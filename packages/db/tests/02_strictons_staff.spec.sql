@@ -12,10 +12,14 @@ begin;
 
 select plan(12);
 
--- Seed: one staff user, one hotel with guide, one business.
+-- All seeding runs as postgres (caller-owned), BEFORE the role switch.
+-- This includes ad_placements and audit_log INSERTs, which authenticated
+-- (even staff) cannot perform — INSERT into ad_placements has no policy
+-- granting authenticated, and audit_log has its INSERT explicitly revoked
+-- from authenticated/anon. Postgres bypasses RLS during seed.
 select _test_reset_role();
 select _test_seed_user('not-staff@example.test');
--- Capture the staff id by re-seeding via a temp table style.
+
 create temp table _t_ids (k text, v uuid);
 -- Grant temp-table access across all roles so reads survive SET ROLE in
 -- this transaction. Smell flagged in suite-09 fix commit; the long-term
@@ -31,7 +35,22 @@ insert into _t_ids (k, v)
 insert into _t_ids (k, v)
   select 'business', _test_seed_business('Beta Cafes Pty Ltd');
 
--- Switch to staff.
+-- Pre-seed an ad_placement so the staff quality_concern INSERT later has
+-- a target.
+insert into public.ad_placements (guide_id, business_id, ad_size, price_cents)
+values (
+  (select v from _t_ids where k='guide'),
+  (select v from _t_ids where k='business'),
+  'half',
+  160000
+);
+
+-- Pre-seed an audit_log row so the staff append-only-trigger tests later
+-- have a row to attempt UPDATE / DELETE against.
+insert into public.audit_log (actor_role, action, entity_type, entity_id)
+values ('strictons_staff', 'seed', 'hotels', (select v from _t_ids where k='hotel'));
+
+-- Switch to staff for the assertions.
 select _test_as_user((select v from _t_ids where k='staff'));
 
 -- ---- SELECT visibility -----------------------------------------------------
@@ -63,15 +82,7 @@ select lives_ok(
   'staff INSERT candidate_businesses succeeds'
 );
 
--- Strictons resolution of a quality_concern: requires an ad_placement first.
-insert into public.ad_placements (guide_id, business_id, ad_size, price_cents)
-  values (
-    (select v from _t_ids where k='guide'),
-    (select v from _t_ids where k='business'),
-    'half',
-    160000
-  );
-
+-- Strictons resolution of a quality_concern (placement was pre-seeded above).
 select lives_ok(
   format(
     $$insert into public.quality_concerns (ad_placement_id, status, raised_at)
@@ -90,11 +101,10 @@ select lives_ok(
 );
 
 -- ---- Staff cannot bypass append-only on audit_log -------------------------
--- Even staff bypassing RLS via policy still hits the append-only triggers,
--- because the triggers RAISE regardless of role.
-
-insert into public.audit_log (actor_role, action, entity_type, entity_id)
-  values ('strictons_staff', 'seed', 'hotels', (select v from _t_ids where k='hotel'));
+-- Even staff bypassing RLS via SELECT policies still hits the append-only
+-- triggers on UPDATE/DELETE, because the triggers RAISE regardless of role.
+-- (audit_log row was pre-seeded above as postgres; staff cannot INSERT
+-- because audit_log INSERT is revoked from authenticated.)
 
 select throws_ok(
   $$update public.audit_log set action = 'tampered' where true$$,
