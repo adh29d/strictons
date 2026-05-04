@@ -1,0 +1,13 @@
+node_modules
+.next
+.turbo
+dist
+build
+coverage
+pnpm-lock.yaml
+*.log
+
+# Authored docs — not auto-formatted
+CLAUDE.md
+README.md
+STRICTONS-BRIEF.md
