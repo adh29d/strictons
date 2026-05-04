@@ -10,7 +10,7 @@
 
 begin;
 
-select plan(20);
+select plan(21);
 
 -- Seed minimal data as postgres so anon has something to (fail to) see.
 select _test_reset_role();
@@ -70,13 +70,29 @@ select throws_ok(
 select throws_ok(
   $$update public.hotels set name = 'Pwned' where true$$,
   null, null,
-  'anon UPDATE hotels denied'
+  'anon UPDATE hotels denied (raises at GRANT layer, not silently 0-rows under RLS)'
 );
 
 select throws_ok(
   $$delete from public.hotels where true$$,
   null, null,
-  'anon DELETE hotels denied'
+  'anon DELETE hotels denied (raises at GRANT layer)'
+);
+
+-- Structural audit: no public table grants INSERT, UPDATE, or DELETE to anon.
+-- Catches future regressions (any new public table that forgets to revoke).
+-- Strictly more thorough than enumerating throws_ok per table because it
+-- asserts the GRANT topology rather than runtime behaviour on a sample.
+select is(
+  (
+    select count(*)::int
+    from information_schema.role_table_grants
+    where grantee = 'anon'
+      and table_schema = 'public'
+      and privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+  ),
+  0,
+  'no public table grants INSERT/UPDATE/DELETE to anon (structural audit)'
 );
 
 select * from finish();

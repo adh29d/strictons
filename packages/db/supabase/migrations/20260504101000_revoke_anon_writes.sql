@@ -1,0 +1,49 @@
+-- ============================================================================
+-- Security: revoke INSERT / UPDATE / DELETE on every public table from anon.
+-- ----------------------------------------------------------------------------
+-- Why this exists.
+--
+-- Postgres RLS treats UPDATE and DELETE differently from INSERT when no
+-- policy applies to the calling role:
+--
+--   INSERT — WITH CHECK is mandatory; absence of any matching policy raises
+--            (SQLSTATE 42501, "new row violates row-level security policy").
+--   UPDATE — USING filters target rows; absence of any matching policy
+--            simply returns no rows to update. The statement SUCCEEDS with
+--            zero rows affected. No error.
+--   DELETE — same as UPDATE.
+--
+-- Combined with Supabase's default `grant insert, update, delete on all
+-- tables in schema public to anon, authenticated` machinery, this means
+-- an unauthenticated request can issue UPDATE / DELETE statements against
+-- any public table and receive a successful (zero-row) response. RLS keeps
+-- data safe — the rows aren't actually mutated — but the surface still
+-- has these side effects:
+--
+--   * Server cycles spent evaluating policies on every anon write request.
+--   * Audit log ambiguity (was the request blocked or did it just match
+--     no rows?).
+--   * Schema-leak vectors via column-level constraint error messages.
+--   * Timing-attack signal that suggests the row exists / doesn't exist.
+--   * Tests that expect denial cannot rely on throws as the signal.
+--
+-- The clean defense is to revoke the grant entirely so the SQL layer
+-- raises permission_denied before RLS is consulted. The anon role has no
+-- legitimate write path on any public table — every guest interaction on
+-- mystay.au reads via the server-side service-role client per the locked
+-- routing decision. So blanket-revoking writes from anon is non-disruptive.
+--
+-- Bug discovered by suite 01 of the pgTAP harness asserting throws_ok on
+-- anon UPDATE / DELETE on hotels. The test was correct; the schema was
+-- the bug. This migration fixes the schema, and a structural assertion in
+-- suite 01 (added in a follow-up commit) prevents regression by querying
+-- information_schema.role_table_grants for any future anon write privilege.
+-- ============================================================================
+
+revoke insert, update, delete on all tables in schema public from anon;
+
+-- Default privileges for FUTURE tables in public schema.
+-- This catches the case where a developer adds a new public table in a
+-- later migration and forgets to revoke. Combined with the structural
+-- pgTAP assertion in suite 01, double belt-and-braces.
+alter default privileges in schema public revoke insert, update, delete on tables from anon;
