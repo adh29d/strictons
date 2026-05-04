@@ -68,11 +68,37 @@ as $$
 declare
   new_user_id uuid := gen_random_uuid();
 begin
-  -- Bypass auth.users for tests; insert directly into public.users (RLS
-  -- bypassed because we're running as postgres). Real auth.users insertion
-  -- via supabase.auth.admin.createUser() is exercised by integration tests
-  -- in Phase 3.
-  insert into public.users (id, email) values (new_user_id, p_email);
+  -- Insert into auth.users; the on_auth_user_created trigger from
+  -- 20260504100100_users_and_strictons_staff auto-inserts the matching
+  -- public.users row, mirroring what supabase.auth.admin.createUser()
+  -- does in production. We bypass GoTrue itself (no password hash, no
+  -- magic-link token) which is fine for fixture seeding — Phase 3
+  -- integration tests exercise the real GoTrue path.
+  insert into auth.users (
+    instance_id,
+    id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+  ) values (
+    '00000000-0000-0000-0000-000000000000',
+    new_user_id,
+    'authenticated',
+    'authenticated',
+    p_email,
+    '',
+    now(),
+    '{}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  );
   return new_user_id;
 end;
 $$;
