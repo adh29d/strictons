@@ -58,7 +58,9 @@ pnpm --filter @strictons/db db:stop                    # tear down
 5. Regenerate types (`gen:types`) and commit the result alongside the migration. CI's drift check fails the PR if you forget.
 6. Add or update pgTAP suites under `tests/` if the migration introduces new RLS surface area.
 
-**Migrations are append-only.** Never edit a migration that has merged to `main`. Fix-forward only — write a new migration that corrects the schema. The dev environment is recreated on every push to `main`; prod uses Supabase PITR backups for recovery.
+**Migrations are append-only once they have successfully applied to any shared environment** (CI green, dev, or prod). After that point, never edit the migration file — fix-forward only by adding a new migration that corrects the schema. The dev environment is recreated on every push to `main`; prod uses Supabase PITR backups for recovery.
+
+**Carve-out: a migration that has never reached green CI may still be edited on its branch**, because no environment has been affected by it and there is nothing to preserve. The discipline protects migrations whose effects exist somewhere; a migration whose effects exist nowhere has not yet earned that protection. Document the edit in the commit message so the reasoning is visible in `git log`.
 
 ## Generated TypeScript types
 
