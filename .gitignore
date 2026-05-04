@@ -9,6 +9,7 @@ dist/
 build/
 out/
 *.tsbuildinfo
+next-env.d.ts
 
 # Env
 .env
