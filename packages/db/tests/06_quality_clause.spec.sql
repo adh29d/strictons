@@ -73,17 +73,24 @@ select throws_ok(
 );
 
 -- ---- hotel_admin: cannot UPDATE the concern to dismissed ------------------
+-- Row counts are captured via DO + GET DIAGNOSTICS + set_config because
+-- Postgres only allows data-modifying CTEs at the top level of a SQL
+-- statement (cannot nest a WITH-UPDATE inside a SELECT inside is()).
+
+do $$
+declare
+  rc int;
+begin
+  update public.quality_concerns
+    set status = 'dismissed', resolved_at = now()
+    where status = 'review_requested';
+  get diagnostics rc = row_count;
+  perform set_config('test.hotel_admin_dismiss_rc', rc::text, true);
+end;
+$$;
 
 select is(
-  (
-    with upd as (
-      update public.quality_concerns
-        set status = 'dismissed', resolved_at = now()
-        where status = 'review_requested'
-        returning 1
-    )
-    select count(*)::int from upd
-  ),
+  current_setting('test.hotel_admin_dismiss_rc')::int,
   0,
   'hotel_admin UPDATE quality_concerns affects 0 rows (no policy)'
 );
@@ -92,16 +99,20 @@ select is(
 
 select _test_as_user((select v from _t where k='staff'));
 
+do $$
+declare
+  rc int;
+begin
+  update public.quality_concerns
+    set status = 'dismissed', resolved_at = now(), resolution_notes = 'staff dismissed'
+    where status = 'review_requested';
+  get diagnostics rc = row_count;
+  perform set_config('test.staff_dismiss_rc', rc::text, true);
+end;
+$$;
+
 select is(
-  (
-    with upd as (
-      update public.quality_concerns
-        set status = 'dismissed', resolved_at = now(), resolution_notes = 'staff dismissed'
-        where status = 'review_requested'
-        returning 1
-    )
-    select count(*)::int from upd
-  ),
+  current_setting('test.staff_dismiss_rc')::int,
   1,
   'Strictons UPDATE quality_concerns -> dismissed succeeds'
 );
@@ -119,16 +130,20 @@ values (
 
 select _test_as_user((select v from _t where k='staff'));
 
+do $$
+declare
+  rc int;
+begin
+  update public.quality_concerns
+    set status = 'action_taken', resolved_at = now(), resolution_notes = 'removed from digital'
+    where status = 'review_requested';
+  get diagnostics rc = row_count;
+  perform set_config('test.staff_action_taken_rc', rc::text, true);
+end;
+$$;
+
 select is(
-  (
-    with upd as (
-      update public.quality_concerns
-        set status = 'action_taken', resolved_at = now(), resolution_notes = 'removed from digital'
-        where status = 'review_requested'
-        returning 1
-    )
-    select count(*)::int from upd
-  ),
+  current_setting('test.staff_action_taken_rc')::int,
   1,
   'Strictons UPDATE quality_concerns -> action_taken succeeds'
 );

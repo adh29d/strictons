@@ -146,17 +146,24 @@ select lives_ok(
 );
 
 -- Hotel admin attempting UPDATE on hotel B contact_email — denied (filter).
--- The query "succeeds" but affects 0 rows because RLS hides hotel B.
+-- The UPDATE "succeeds" but affects 0 rows because RLS hides hotel B.
+-- The row-count check is wrapped in a DO block because Postgres only allows
+-- data-modifying CTEs at the top level of a SQL statement (cannot nest a
+-- WITH-UPDATE inside a SELECT inside is()).
+do $$
+declare
+  rc int;
+begin
+  update public.hotels
+    set contact_email = 'pwn@bravo.test'
+    where id = (select v from _t where k='hotel_b');
+  get diagnostics rc = row_count;
+  perform set_config('test.admin_a_bravo_update_count', rc::text, true);
+end;
+$$;
+
 select is(
-  (
-    with upd as (
-      update public.hotels
-        set contact_email = 'pwn@bravo.test'
-        where id = (select v from _t where k='hotel_b')
-        returning 1
-    )
-    select count(*)::int from upd
-  ),
+  current_setting('test.admin_a_bravo_update_count')::int,
   0,
   'admin_a UPDATE hotel B contact_email affects 0 rows (filtered by RLS)'
 );
