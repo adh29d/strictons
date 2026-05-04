@@ -7,7 +7,7 @@
  *
  * Required env:
  *   SUPABASE_URL                 default: http://127.0.0.1:54321 (local CLI)
- *   SUPABASE_SERVICE_ROLE_KEY    from `supabase start` output
+ *   SUPABASE_SECRET_KEY    from `supabase start` output
  *
  * This script only runs against local dev. The dev and prod Supabase
  * projects must never be seeded with this data.
@@ -16,12 +16,10 @@
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
-if (!SERVICE_ROLE_KEY) {
-  console.error(
-    'SUPABASE_SERVICE_ROLE_KEY is required. Run `supabase status` to copy the local key.',
-  );
+if (!SECRET_KEY) {
+  console.error('SUPABASE_SECRET_KEY is required. Run `supabase status` to copy the local key.');
   process.exit(1);
 }
 
@@ -30,7 +28,7 @@ if (!SUPABASE_URL.includes('127.0.0.1') && !SUPABASE_URL.includes('localhost')) 
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SECRET_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 

@@ -15,7 +15,7 @@ import type { Database } from './database.types';
  *   - Background jobs (rollups, magic-link token issuance, seeding)
  *
  * Importing this from a Client Component will inline the
- * SUPABASE_SERVICE_ROLE_KEY value into the browser bundle and hand
+ * SUPABASE_SECRET_KEY value into the browser bundle and hand
  * full database access to anyone who opens DevTools. Don't.
  *
  * Apps should restrict imports to:
@@ -26,14 +26,14 @@ import type { Database } from './database.types';
  */
 export function createServiceRoleClient(): SupabaseClient<Database> {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY;
   if (!url) {
     throw new Error(
       'createServiceRoleClient: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is required',
     );
   }
   if (!key) {
-    throw new Error('createServiceRoleClient: SUPABASE_SERVICE_ROLE_KEY is required');
+    throw new Error('createServiceRoleClient: SUPABASE_SECRET_KEY is required');
   }
   return createClient<Database>(url, key, {
     auth: {
