@@ -8,6 +8,9 @@ import globals from 'globals';
 export const nextConfig = [
   ...baseConfig,
   {
+    ignores: ['**/next-env.d.ts'],
+  },
+  {
     files: ['**/*.{ts,tsx,js,jsx}'],
     plugins: {
       '@next/next': nextPlugin,
