@@ -9,7 +9,7 @@
 
 begin;
 
-select plan(7);
+select plan(6);
 
 select _test_reset_role();
 

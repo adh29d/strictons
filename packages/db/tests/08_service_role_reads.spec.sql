@@ -20,6 +20,10 @@ create temp table _t (k text primary key, v uuid);
 -- See suite-09 fix commit for the smell + planned follow-up.
 grant select, insert on _t to public;
 
+-- Seed a user so the public.users SELECT assertion has rows to find.
+-- Without this, the assertion would conflate "service_role can SELECT" with
+-- "users table happens to be non-empty" — case (1) per Issue B triage.
+insert into _t values ('user', _test_seed_user('seed-golf@example.test'));
 insert into _t values ('hotel', _test_seed_hotel('golf', 'Golf Hotel'));
 insert into _t values ('guide', _test_seed_guide((select v from _t where k='hotel')));
 insert into _t values ('biz', _test_seed_business('Golf Carts Pty Ltd'));
