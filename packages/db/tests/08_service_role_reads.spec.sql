@@ -16,6 +16,9 @@ select plan(14);
 select _test_reset_role();
 
 create temp table _t (k text primary key, v uuid);
+-- Grant temp-table access across all roles so reads survive SET ROLE.
+-- See suite-09 fix commit for the smell + planned follow-up.
+grant select, insert on _t to public;
 
 insert into _t values ('hotel', _test_seed_hotel('golf', 'Golf Hotel'));
 insert into _t values ('guide', _test_seed_guide((select v from _t where k='hotel')));

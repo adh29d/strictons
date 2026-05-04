@@ -17,6 +17,11 @@ select _test_reset_role();
 select _test_seed_user('not-staff@example.test');
 -- Capture the staff id by re-seeding via a temp table style.
 create temp table _t_ids (k text, v uuid);
+-- Grant temp-table access across all roles so reads survive SET ROLE in
+-- this transaction. Smell flagged in suite-09 fix commit; the long-term
+-- fix is to restructure these suites to capture ids via set_config /
+-- current_setting rather than a session-scoped table.
+grant select, insert on _t_ids to public;
 insert into _t_ids (k, v)
   select 'staff', _test_seed_strictons_staff('staff@example.test');
 insert into _t_ids (k, v)

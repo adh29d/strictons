@@ -15,6 +15,9 @@ select _test_reset_role();
 
 -- Seed hotel A and hotel B with admin members and one guide each.
 create temp table _t (k text primary key, v uuid);
+-- Grant temp-table access across all roles so reads survive SET ROLE.
+-- See suite-09 fix commit for the smell + planned follow-up.
+grant select, insert on _t to public;
 
 insert into _t values ('hotel_a', _test_seed_hotel('alpha', 'Alpha Hotel'));
 insert into _t values ('hotel_b', _test_seed_hotel('bravo', 'Bravo Hotel'));
