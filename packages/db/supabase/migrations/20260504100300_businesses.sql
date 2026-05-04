@@ -16,21 +16,11 @@ create table public.businesses (
   address text,
   social_handles jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-
-  -- Schema gate on social_handles: keys must be from a known set; values
-  -- must be strings. Application-level validation is the primary guard,
-  -- this is belt-and-braces for direct DB writes.
-  check (
-    jsonb_typeof(social_handles) = 'object'
-    and (
-      select bool_and(
-        key in ('instagram', 'facebook', 'tiktok', 'other')
-        and jsonb_typeof(value) = 'string'
-      )
-      from jsonb_each(social_handles)
-    )
-  )
+  updated_at timestamptz not null default now()
+  -- A function-backed CHECK on social_handles is added in the next
+  -- migration. The original inline subquery-based CHECK was removed
+  -- here because Postgres rejects subqueries in CHECK constraints
+  -- (SQLSTATE 0A000) — see 20260504100900_add_social_handles_check.sql.
 );
 
 create trigger businesses_set_updated_at
