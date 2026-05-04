@@ -1,0 +1,27 @@
+{
+  "name": "@strictons/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./app-shell": "./src/app-shell.tsx"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@strictons/config-eslint": "workspace:*",
+    "@strictons/config-tsconfig": "workspace:*",
+    "@types/react": "^19.0.0",
+    "eslint": "^9.15.0",
+    "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

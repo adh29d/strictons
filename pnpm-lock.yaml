@@ -58,6 +58,43 @@ importers:
 
   packages/config/tsconfig: {}
 
+  packages/types:
+    devDependencies:
+      '@strictons/config-eslint':
+        specifier: workspace:*
+        version: link:../config/eslint
+      '@strictons/config-tsconfig':
+        specifier: workspace:*
+        version: link:../config/tsconfig
+      eslint:
+        specifier: ^9.15.0
+        version: 9.39.4
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/ui:
+    dependencies:
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+    devDependencies:
+      '@strictons/config-eslint':
+        specifier: workspace:*
+        version: link:../config/eslint
+      '@strictons/config-tsconfig':
+        specifier: workspace:*
+        version: link:../config/tsconfig
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      eslint:
+        specifier: ^9.15.0
+        version: 9.39.4
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
 packages:
 
   '@eslint-community/eslint-utils@4.9.1':
@@ -171,6 +208,9 @@ packages:
 
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
+
+  '@types/react@19.2.14':
+    resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
 
   '@typescript-eslint/eslint-plugin@8.59.1':
     resolution: {integrity: sha512-BOziFIfE+6osHO9FoJG4zjoHUcvI7fTNBSpdAwrNH0/TLvzjsk2oo8XSSOT2HhqUyhZPfHv4UOffoJ9oEEQ7Ag==}
@@ -338,6 +378,9 @@ packages:
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   data-view-buffer@1.0.2:
     resolution: {integrity: sha512-EmKO5V3OLXh1rtK2wgXRansaK1/mtVdTUEiEI0W8RkvgT05kfxaH29PliLnpLP73yYO6142Q72QNa8Wx/A5CqQ==}
@@ -894,6 +937,10 @@ packages:
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
+  react@19.2.5:
+    resolution: {integrity: sha512-llUJLzz1zTUBrskt2pwZgLq59AemifIftw4aB7JxOqf1HY2FDaGDxgwpAPVzHU1kdWabH7FauP4i1oEeer2WCA==}
+    engines: {node: '>=0.10.0'}
+
   reflect.getprototypeof@1.0.10:
     resolution: {integrity: sha512-00o4I+DVrefhv+nX0ulyi3biSHCPDe+yLv5o/p6d/UVlirijB8E16FtfwSAi4g3tcqrQ4lRAqQSoFEZJehYEcw==}
     engines: {node: '>= 0.4'}
@@ -1205,6 +1252,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/react@19.2.14':
+    dependencies:
+      csstype: 3.2.3
+
   '@typescript-eslint/eslint-plugin@8.59.1(@typescript-eslint/parser@8.59.1(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
@@ -1432,6 +1483,8 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  csstype@3.2.3: {}
 
   data-view-buffer@1.0.2:
     dependencies:
@@ -2100,6 +2153,8 @@ snapshots:
   queue-microtask@1.2.3: {}
 
   react-is@16.13.1: {}
+
+  react@19.2.5: {}
 
   reflect.getprototypeof@1.0.10:
     dependencies:
