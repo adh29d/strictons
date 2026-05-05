@@ -88,3 +88,7 @@ These are explicitly deferred. Don't build them unless we agree to bring them fo
 - It's a standard convention for the stack
 
 When you decide and proceed, mention what you decided in the summary at the end of the task.
+
+## End of phase
+
+At the end of each phase (PR merged to `main`, deploy verified, manual verification done), append a new section to `PROJECT_LOG.md` covering "What landed", "Locked decisions", "Gotchas", and "What's deferred". Use existing entries as the template. This is the last commit of the phase, on a small follow-up PR.
