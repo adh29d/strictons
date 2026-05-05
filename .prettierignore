@@ -10,3 +10,6 @@ pnpm-lock.yaml
 # Authored docs — not auto-formatted
 CLAUDE.md
 STRICTONS-BRIEF.md
+
+# Generated files — owned by their generator, not Prettier
+packages/db/src/database.types.ts
