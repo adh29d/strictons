@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     "./types": "./src/database.types.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./server": "./src/server.ts",
+    "./browser": "./src/browser.ts",
+    "./session": "./src/session.ts"
   },
   "scripts": {
     "db:start": "supabase start",
@@ -15,6 +18,7 @@
     "db:push:prod": "supabase db push --db-url $SUPABASE_DB_URL_PROD --include-all",
     "db:diff:prod": "supabase db diff --db-url $SUPABASE_DB_URL_PROD --schema public",
     "db:test": "node ./scripts/run-pgtap.mjs",
+    "test": "vitest run",
     "db:seed": "tsx scripts/seed.ts",
     "gen:types": "supabase gen types typescript --local --schema public > src/database.types.ts",
     "lint": "eslint .",
@@ -29,6 +33,7 @@
     "@strictons/config-eslint": "workspace:*",
     "@strictons/config-tsconfig": "workspace:*",
     "eslint": "^9.15.0",
+    "next": "^15.5.15",
     "supabase": "^1.226.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
