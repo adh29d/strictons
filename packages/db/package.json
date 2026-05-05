@@ -16,7 +16,7 @@
     "db:diff:prod": "supabase db diff --db-url $SUPABASE_DB_URL_PROD --schema public",
     "db:test": "node ./scripts/run-pgtap.mjs",
     "db:seed": "tsx scripts/seed.ts",
-    "gen:types": "supabase gen types typescript --local > src/database.types.ts",
+    "gen:types": "supabase gen types typescript --local --schema public > src/database.types.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf .turbo *.tsbuildinfo"

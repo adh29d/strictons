@@ -55,13 +55,12 @@ jobs:
         working-directory: packages/db
         run: pnpm exec supabase start
 
-      - name: Run pgTAP suites
-        working-directory: packages/db
-        env:
-          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-        run: pnpm db:test
-
       - name: Regenerate TypeScript types
+        # Runs BEFORE the pgTAP suites. The suites' _setup.sql installs the
+        # pgtap extension, which adds tap_funky and pg_all_foreign_keys
+        # relations into the public schema. If gen:types runs after that
+        # install, those pgTAP-internal relations leak into the application's
+        # generated types. Generating first keeps the output to our schema.
         working-directory: packages/db
         run: pnpm gen:types
 
@@ -73,6 +72,12 @@ jobs:
             echo "::error::Run \`pnpm --filter @strictons/db gen:types\` locally and commit the result."
             exit 1
           fi
+
+      - name: Run pgTAP suites
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: pnpm db:test
 
       - name: Stop local Supabase
         if: always()
