@@ -4,6 +4,8 @@
 
 Read `STRICTONS_BRIEF.md` in this directory for the full product brief. Always reference it when making architectural or product decisions. If the brief and this file disagree, ask before resolving — don't assume one supersedes the other.
 
+`PROJECT_LOG.md` is the running record of what each phase landed, what we decided, and what surprised us. Read it on session start to understand the current state of the project and the gotchas we've already paid for.
+
 ## Stack
 
 - **Next.js** (App Router) deployed via Vercel
@@ -92,3 +94,16 @@ When you decide and proceed, mention what you decided in the summary at the end 
 ## End of phase
 
 At the end of each phase (PR merged to `main`, deploy verified, manual verification done), append a new section to `PROJECT_LOG.md` covering "What landed", "Locked decisions", "Gotchas", and "What's deferred". Use existing entries as the template. This is the last commit of the phase, on a small follow-up PR.
+
+## Secrets discipline
+
+- **Never paste secret values** (API keys, database passwords, JWTs, access tokens, magic-link tokens, OAuth client secrets) in chat or in commits. Not in commit messages, not in PR descriptions, not in test fixtures, not even in comments.
+- **Reference secrets by their env var name only** (e.g. `SUPABASE_SECRET_KEY`, `SENDGRID_API_KEY`, `CLOUDINARY_API_SECRET`). When code needs a secret, read it from `process.env.<NAME>` and fail loudly if missing.
+- **When a new secret is needed**, ask which env var name to use and confirm the user has it configured in GitHub repo secrets and Vercel env vars before referencing it in code. Don't invent a name.
+- **`.env.example` files include only the env var name and a brief comment**, never a real value. Avoid value-shaped placeholders (`sb_secret_xxxxx`, `re_xxxxx`) that a future reader could mistake for real credentials.
+
+## Migrations
+
+`packages/db/README.md` is the canonical source for migration-authoring conventions: schema conventions, RLS policy conventions, type regeneration, the env-var matrix, the prod provisioning runbook. Read it before adding any migration.
+
+The most important rule: **migrations are append-only once they have applied to a shared environment** (CI green, dev, or prod). After that point, never edit the migration file — fix-forward only by adding a new migration. The carve-out for migrations on a branch that has not yet reached green CI (no environment has been affected, so editing in place is permitted) is documented with rationale in `packages/db/README.md`.
