@@ -4,18 +4,22 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./placeholder": "./src/placeholder.ts"
+    "./placeholder": "./src/placeholder.ts",
+    "./invites": "./src/invites.ts",
+    "./auth": "./src/auth.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf .turbo *.tsbuildinfo"
   },
   "devDependencies": {
     "@strictons/config-eslint": "workspace:*",
     "@strictons/config-tsconfig": "workspace:*",
     "eslint": "^9.15.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
   },
   "dependencies": {
     "zod": "^4.4.3"
