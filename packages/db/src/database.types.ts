@@ -342,8 +342,11 @@ export type Database = {
           business_id: string
           created_at: string
           id: string
+          invited_by: string | null
           invited_email: string
           is_admin: boolean
+          revoked_at: string | null
+          revoked_by: string | null
           user_id: string | null
         }
         Insert: {
@@ -351,8 +354,11 @@ export type Database = {
           business_id: string
           created_at?: string
           id?: string
+          invited_by?: string | null
           invited_email: string
           is_admin?: boolean
+          revoked_at?: string | null
+          revoked_by?: string | null
           user_id?: string | null
         }
         Update: {
@@ -360,8 +366,11 @@ export type Database = {
           business_id?: string
           created_at?: string
           id?: string
+          invited_by?: string | null
           invited_email?: string
           is_admin?: boolean
+          revoked_at?: string | null
+          revoked_by?: string | null
           user_id?: string | null
         }
         Relationships: [
@@ -370,6 +379,20 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_users_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_users_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {
@@ -839,8 +862,11 @@ export type Database = {
           created_at: string
           hotel_id: string
           id: string
+          invited_by: string | null
           invited_email: string
           is_admin: boolean
+          revoked_at: string | null
+          revoked_by: string | null
           user_id: string | null
         }
         Insert: {
@@ -848,8 +874,11 @@ export type Database = {
           created_at?: string
           hotel_id: string
           id?: string
+          invited_by?: string | null
           invited_email: string
           is_admin?: boolean
+          revoked_at?: string | null
+          revoked_by?: string | null
           user_id?: string | null
         }
         Update: {
@@ -857,8 +886,11 @@ export type Database = {
           created_at?: string
           hotel_id?: string
           id?: string
+          invited_by?: string | null
           invited_email?: string
           is_admin?: boolean
+          revoked_at?: string | null
+          revoked_by?: string | null
           user_id?: string | null
         }
         Relationships: [
@@ -867,6 +899,20 @@ export type Database = {
             columns: ["hotel_id"]
             isOneToOne: false
             referencedRelation: "hotels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hotel_users_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hotel_users_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {
