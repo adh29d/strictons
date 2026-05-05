@@ -79,6 +79,74 @@ select throws_ok(
   'anon DELETE hotels denied (raises at GRANT layer)'
 );
 
+-- ---------------------------------------------------------------------------
+-- DIAGNOSTIC: emit the migration list and the exact orphan tuples to the
+-- CI log via RAISE NOTICE before the assertion runs. The `is()` test alone
+-- only reports the count; the explicit enumeration lets us see which
+-- (table, role, privilege) tuples CI considers orphans, so the next fix
+-- targets the right set rather than guessing.
+--
+-- Remove this DO block once the audit returns 0 in CI.
+-- ---------------------------------------------------------------------------
+
+-- 1) Confirm migration 20260504101200_revoke_view_writes ran. Defensive:
+--    if the migration tracking table isn't where we expect, log and move on.
+do $$
+declare
+  has_tracking bool;
+  rec record;
+begin
+  select exists (
+    select 1 from information_schema.tables
+    where table_schema = 'supabase_migrations'
+      and table_name = 'schema_migrations'
+  ) into has_tracking;
+
+  if not has_tracking then
+    raise notice '[diag] supabase_migrations.schema_migrations not found — migration list unavailable';
+    return;
+  end if;
+
+  raise notice '[diag] schema_migrations versions:';
+  for rec in execute
+    'select version::text as version from supabase_migrations.schema_migrations order by version'
+  loop
+    raise notice '[diag]   %', rec.version;
+  end loop;
+exception when others then
+  raise notice '[diag] reading schema_migrations failed: %', sqlerrm;
+end;
+$$;
+
+-- 2) Enumerate orphan GRANTs CI considers offending.
+do $$
+declare
+  rec record;
+begin
+  raise notice '[diag] orphan GRANT enumeration begin';
+  for rec in
+    select rtg.table_name, rtg.grantee, rtg.privilege_type
+    from information_schema.role_table_grants rtg
+    where rtg.grantee in ('anon', 'authenticated')
+      and rtg.table_schema = 'public'
+      and rtg.privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+      and not exists (
+        select 1
+        from pg_policies p
+        where p.schemaname = 'public'
+          and p.tablename = rtg.table_name
+          and rtg.grantee = any (p.roles)
+          and (p.cmd = rtg.privilege_type or p.cmd = 'ALL')
+      )
+    order by rtg.table_name, rtg.grantee, rtg.privilege_type
+  loop
+    raise notice '[diag] orphan: table=% role=% privilege=%',
+      rec.table_name, rec.grantee, rec.privilege_type;
+  end loop;
+  raise notice '[diag] orphan GRANT enumeration end';
+end;
+$$;
+
 -- Structural audit: every INSERT / UPDATE / DELETE GRANT on a public table
 -- to anon or authenticated must be backed by an RLS policy that permits
 -- that role + that operation. Catches both:
