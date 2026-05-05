@@ -16,5 +16,8 @@
     "@strictons/config-tsconfig": "workspace:*",
     "eslint": "^9.15.0",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

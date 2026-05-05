@@ -22,6 +22,7 @@
     "clean": "rm -rf .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
