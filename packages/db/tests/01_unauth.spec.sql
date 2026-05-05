@@ -155,8 +155,16 @@ $$;
 --   * orphan GRANTs to authenticated (a GRANT that no policy permits is
 --     a silent-zero-rows bug, the same shape as the original Issue A
 --     finding on hotels)
+--
+-- Extension-owned objects (e.g. pgTAP's pg_all_foreign_keys and tap_funky
+-- helper relations, installed in public by `create extension pgtap`) are
+-- excluded via pg_depend. The audit's job is to enforce *our* schema's
+-- security surface; an extension's internal helpers are out of scope and
+-- have no application-level RLS policies anyway.
+--
 -- The assertion scales — no per-table enumeration, catches new tables
--- automatically as they're added in later phases.
+-- automatically as they're added in later phases. Future extensions
+-- installed in public are auto-excluded.
 select is(
   (
     select count(*)::int
@@ -171,6 +179,17 @@ select is(
           and p.tablename = rtg.table_name
           and rtg.grantee = any (p.roles)
           and (p.cmd = rtg.privilege_type or p.cmd = 'ALL')
+      )
+      and not exists (
+        select 1
+        from pg_depend d
+        join pg_class c on c.oid = d.objid
+        join pg_namespace n on n.oid = c.relnamespace
+        where d.classid = 'pg_class'::regclass
+          and d.refclassid = 'pg_extension'::regclass
+          and d.deptype = 'e'
+          and n.nspname = rtg.table_schema
+          and c.relname = rtg.table_name
       )
   ),
   0,
