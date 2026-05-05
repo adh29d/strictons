@@ -72,17 +72,25 @@ select lives_ok(
 
 -- ---- Writes that staff is the only role allowed to do ---------------------
 
--- Insert a candidate_business row (Strictons curation).
+-- Insert a candidate_business row. The Strictons FOR ALL bypass policy on
+-- candidate_businesses was dropped in 20260504101100 (writes route through
+-- the service-role client per the locked architecture decision), so this
+-- assertion exercises the production path: brief switch to service_role
+-- for the curation INSERT, then back to staff for the remaining checks.
+select _test_as_service();
 select lives_ok(
   format(
     $$insert into public.candidate_businesses (hotel_id, source, name)
       values (%L, 'manual', 'Beta Hardware')$$,
     (select v from _t_ids where k='hotel')
   ),
-  'staff INSERT candidate_businesses succeeds'
+  'service_role INSERT candidate_businesses succeeds (Strictons curation path)'
 );
+select _test_as_user((select v from _t_ids where k='staff'));
 
 -- Strictons resolution of a quality_concern (placement was pre-seeded above).
+-- quality_concerns retains the strictons-via-authenticated INSERT and UPDATE
+-- policies, so this still exercises the staff/authenticated path.
 select lives_ok(
   format(
     $$insert into public.quality_concerns (ad_placement_id, status, raised_at)
