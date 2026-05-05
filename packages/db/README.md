@@ -8,8 +8,10 @@ Database schema, RLS policies, generated types, and the typed Supabase client fo
 packages/db/
 ├── supabase/
 │   ├── config.toml          # Local CLI configuration (Postgres on 54322)
-│   ├── migrations/          # Ordered SQL migrations, append-only
-│   └── seed.sql             # Static reference data (mood_options) — auto-applied
+│   └── migrations/          # Ordered SQL migrations, append-only.
+│                            #   Reference data (mood_options) lives here too,
+│                            #   not in seed.sql, so `supabase db push` picks
+│                            #   it up against hosted environments.
 ├── src/
 │   ├── client.ts            # createServiceRoleClient() — server-side only
 │   └── database.types.ts    # Auto-generated; regenerate after every migration
@@ -30,7 +32,7 @@ Prerequisites: Docker Desktop running. Everything else (Supabase CLI, Node 22, p
 ```bash
 pnpm install                                           # once
 pnpm --filter @strictons/db db:start                   # boots local Supabase (~60s first time)
-pnpm --filter @strictons/db db:reset                   # apply migrations + seed.sql
+pnpm --filter @strictons/db db:reset                   # apply all migrations (incl. reference-data seed)
 pnpm --filter @strictons/db gen:types                  # regenerate src/database.types.ts
 SUPABASE_SECRET_KEY=$(pnpm --filter @strictons/db exec supabase status -o env | grep SERVICE_ROLE_KEY | cut -d= -f2 | tr -d '"') \
   pnpm --filter @strictons/db db:seed                  # auth-linked dev fixtures
@@ -38,7 +40,9 @@ pnpm --filter @strictons/db db:test                    # pgTAP suites
 pnpm --filter @strictons/db db:stop                    # tear down
 ```
 
-`db:reset` is destructive — it drops the local DB and re-applies all migrations + `seed.sql`. Always safe locally; never run against dev or prod.
+`db:reset` is destructive — it drops the local DB and re-applies every migration. Always safe locally; never run against dev or prod.
+
+**Reference data lives in migrations, not in `seed.sql`.** Supabase's `db push` (used by the dev / prod deploy workflows) only applies migrations; `seed.sql` is local-only. Anything every environment needs (mood_options, future enum-backed taxonomies, etc.) must ship as a migration with `INSERT ... ON CONFLICT DO NOTHING` so it's idempotent and re-runnable. Auth-linked dev fixtures (test users, sample hotels) stay in `scripts/seed.ts` and only target local.
 
 ## Adding a migration
 

@@ -1,12 +1,26 @@
 -- ============================================================================
--- Static seed data — runs automatically on `supabase db reset`.
--- Reference data only; auth-linked dev fixtures live in scripts/seed.ts.
+-- Reference data: the brief 9.6 starter mood_options list.
+-- ----------------------------------------------------------------------------
+-- These are reference rows every environment needs (mystay rendering, the
+-- business-portal mood selector, the Strictons admin dashboard). Originally
+-- shipped as supabase/seed.sql, which only runs on `supabase db reset`
+-- (local only) — `supabase db push` against hosted projects ignores it,
+-- so dev and prod ended up with an empty mood_options table.
+--
+-- Promoted to a migration so db push picks it up. The seed.sql file is
+-- removed in the same commit so we have one source of truth.
+--
+-- Idempotent via ON CONFLICT (slug) DO NOTHING: safe to re-run, leaves any
+-- Strictons-edited rows untouched (only the slug-keyed seed entries are
+-- inserted, and only when missing). Strictons admin can later UPDATE
+-- description/design_treatment_notes/reference_image_cloudinary_ids without
+-- this migration overwriting on the next push — UPDATEs are not part of
+-- this seed contract.
+--
+-- Slugs are stable IDs. reference_image_cloudinary_ids will be populated by
+-- the Strictons admin once Cloudinary is wired up in Phase 5; empty arrays
+-- here are intentional, not a placeholder bug.
 -- ============================================================================
-
--- ---- mood_options (the brief 9.6 starter list) ----------------------------
--- Slugs are stable IDs; reference_image_cloudinary_ids will be populated by
--- the Strictons admin once Cloudinary is wired up in Phase 5. Empty array
--- here is intentional and not a placeholder bug.
 
 insert into public.mood_options (slug, label, description, design_treatment_notes)
 values
@@ -69,4 +83,5 @@ values
     'Refined and classic',
     'Serif typography, balanced symmetric layouts, muted palettes, traditional cues. For heritage venues, classic dining, antiques, formal experiences.',
     'Muted palette (ivory, charcoal, deep burgundy or navy). Traditional serifs (Garamond / Caslon family). Symmetric layouts. Photography subdued and respectful.'
-  );
+  )
+on conflict (slug) do nothing;
