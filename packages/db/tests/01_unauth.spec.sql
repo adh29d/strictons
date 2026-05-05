@@ -79,20 +79,34 @@ select throws_ok(
   'anon DELETE hotels denied (raises at GRANT layer)'
 );
 
--- Structural audit: no public table grants INSERT, UPDATE, or DELETE to anon.
--- Catches future regressions (any new public table that forgets to revoke).
--- Strictly more thorough than enumerating throws_ok per table because it
--- asserts the GRANT topology rather than runtime behaviour on a sample.
+-- Structural audit: every INSERT / UPDATE / DELETE GRANT on a public table
+-- to anon or authenticated must be backed by an RLS policy that permits
+-- that role + that operation. Catches both:
+--   * orphan GRANTs to anon (should be zero — anon has no legitimate
+--     write path on any public table per the locked decision)
+--   * orphan GRANTs to authenticated (a GRANT that no policy permits is
+--     a silent-zero-rows bug, the same shape as the original Issue A
+--     finding on hotels)
+-- The assertion scales — no per-table enumeration, catches new tables
+-- automatically as they're added in later phases.
 select is(
   (
     select count(*)::int
-    from information_schema.role_table_grants
-    where grantee = 'anon'
-      and table_schema = 'public'
-      and privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+    from information_schema.role_table_grants rtg
+    where rtg.grantee in ('anon', 'authenticated')
+      and rtg.table_schema = 'public'
+      and rtg.privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+      and not exists (
+        select 1
+        from pg_policies p
+        where p.schemaname = 'public'
+          and p.tablename = rtg.table_name
+          and rtg.grantee = any (p.roles)
+          and (p.cmd = rtg.privilege_type or p.cmd = 'ALL')
+      )
   ),
   0,
-  'no public table grants INSERT/UPDATE/DELETE to anon (structural audit)'
+  'no public table grants INSERT/UPDATE/DELETE to anon or authenticated without a backing RLS policy (structural audit)'
 );
 
 select * from finish();
