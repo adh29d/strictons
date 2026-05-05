@@ -50,9 +50,7 @@ export async function createServerClient(): Promise<SupabaseClient<Database>> {
     throw new Error('createServerClient: NEXT_PUBLIC_SUPABASE_URL is required');
   }
   if (!key) {
-    throw new Error(
-      'createServerClient: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required',
-    );
+    throw new Error('createServerClient: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required');
   }
 
   const cookieStore = await cookies();

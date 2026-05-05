@@ -38,9 +38,7 @@ export function createBrowserClient(): SupabaseClient<Database> {
     throw new Error('createBrowserClient: NEXT_PUBLIC_SUPABASE_URL is required');
   }
   if (!key) {
-    throw new Error(
-      'createBrowserClient: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required',
-    );
+    throw new Error('createBrowserClient: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required');
   }
 
   // No `cookieOptions` here intentionally — `httpOnly`, `secure`, and

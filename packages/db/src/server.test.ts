@@ -58,9 +58,7 @@ describe('createServerClient', () => {
     const opts = ssrCreateServerClientMock.mock.calls[0]![2] as {
       cookies: {
         getAll: () => unknown;
-        setAll: (
-          cookiesToSet: { name: string; value: string; options: object }[],
-        ) => void;
+        setAll: (cookiesToSet: { name: string; value: string; options: object }[]) => void;
       };
     };
 
@@ -77,7 +75,7 @@ describe('createServerClient', () => {
     });
   });
 
-  it("setAll swallows errors from the read-only Server Component cookies() context", async () => {
+  it('setAll swallows errors from the read-only Server Component cookies() context', async () => {
     const cookieStore = {
       getAll: vi.fn().mockReturnValue([]),
       set: vi.fn().mockImplementation(() => {
@@ -95,9 +93,7 @@ describe('createServerClient', () => {
       };
     };
 
-    expect(() =>
-      opts.cookies.setAll([{ name: 'x', value: 'y', options: {} }]),
-    ).not.toThrow();
+    expect(() => opts.cookies.setAll([{ name: 'x', value: 'y', options: {} }])).not.toThrow();
   });
 
   it('passes 7-day maxAge and lax sameSite cookie options', async () => {
@@ -127,8 +123,6 @@ describe('createServerClient', () => {
   it('throws a clear error when NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is missing', async () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
     const { createServerClient } = await import('./server');
-    await expect(createServerClient()).rejects.toThrow(
-      /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/,
-    );
+    await expect(createServerClient()).rejects.toThrow(/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
   });
 });
