@@ -54,6 +54,7 @@ pnpm --filter @strictons/db db:stop                    # tear down
    - Business-scoped tables get `is_business_user(uuid)` / `is_business_admin(uuid)`.
    - Strictons all-access predicate is `is_strictons_staff()`.
    - Service-role-only mutations: don't create an INSERT/UPDATE/DELETE policy and ensure GRANTs are revoked from `authenticated`/`anon` where appropriate.
+   - **Views need explicit revokes.** `revoke ... on all tables in schema public` does not reliably extend to views in Supabase's Postgres. When creating a view, also `revoke insert, update, delete on public.<view> from anon, authenticated` if the view is read-only (which most are).
 4. Apply locally (`db:reset`) and run pgTAP (`db:test`) before committing.
 5. Regenerate types (`gen:types`) and commit the result alongside the migration. CI's drift check fails the PR if you forget.
 6. Add or update pgTAP suites under `tests/` if the migration introduces new RLS surface area.

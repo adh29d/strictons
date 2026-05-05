@@ -1,0 +1,36 @@
+-- ============================================================================
+-- Security: revoke INSERT/UPDATE/DELETE on the active_mood_options view from
+-- anon and authenticated.
+-- ----------------------------------------------------------------------------
+-- The 20260504100600_briefs migration creates the active_mood_options view
+-- with `grant select on public.active_mood_options to authenticated, anon`.
+-- That GRANT is correct for the read path. However, when the view was
+-- created, Supabase's default ALL-on-tables grants for anon/authenticated
+-- also fired, granting INSERT / UPDATE / DELETE on the view in addition to
+-- SELECT.
+--
+-- The earlier blanket revokes did not catch this:
+--   * 20260504101000_revoke_anon_writes.sql ran
+--     `revoke insert, update, delete on all tables in schema public from anon`
+--     which in CI's Postgres does not extend to views (despite the docs
+--     suggesting it should — observed via the structural audit).
+--   * 20260504101100_revoke_authenticated_writes.sql was per-table and did
+--     not list the view.
+--
+-- The structural audit (suite 01 test 21) flagged six orphan GRANTs,
+-- enumerated locally as:
+--   active_mood_options × {anon, authenticated} × {INSERT, UPDATE, DELETE}
+--
+-- The GRANTs are not actually exploitable — the view is not updatable
+-- (no INSTEAD OF trigger, security_invoker = true, underlying mood_options
+-- has no INSERT/UPDATE/DELETE policies for either role) — so any attempt
+-- would fail at runtime. But the audit is right to flag them: a GRANT
+-- with no backing policy is a category of bug worth not having.
+--
+-- This migration revokes them explicitly. Future view-creating migrations
+-- must include the same explicit revoke (now documented in the README's
+-- migration-authoring checklist).
+-- ============================================================================
+
+revoke insert, update, delete on public.active_mood_options from anon;
+revoke insert, update, delete on public.active_mood_options from authenticated;
