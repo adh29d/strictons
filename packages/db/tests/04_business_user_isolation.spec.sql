@@ -6,7 +6,7 @@
 
 begin;
 
-select plan(11);
+select plan(13);
 
 select _test_reset_role();
 
@@ -144,6 +144,38 @@ select throws_ok(
   ),
   null, null,
   'admin_x INSERT brief_asset on brief Y by direct id denied'
+);
+
+-- ---- Revoked business_user behaves like a non-member ---------------------
+-- Symmetric to the revoked-hotel-user assertions in suite 03. Migration 14's
+-- refined is_business_user helper excludes revoked rows.
+
+select _test_reset_role();
+
+insert into _t values ('user_x_rev', _test_seed_user('user-x-revoked@example.test'));
+insert into public.business_users
+  (business_id, user_id, invited_email, accepted_at, revoked_at, revoked_by)
+  values (
+    (select v from _t where k='biz_x'),
+    (select v from _t where k='user_x_rev'),
+    'user-x-revoked@example.test',
+    now(),
+    now(),
+    (select v from _t where k='admin_x')
+  );
+
+select _test_as_user((select v from _t where k='user_x_rev'));
+
+select is(
+  (select count(*)::int from public.businesses),
+  0,
+  'revoked business_user sees zero businesses (membership-helper excludes revoked rows)'
+);
+
+select is(
+  public.is_business_user((select v from _t where k='biz_x')),
+  false,
+  'is_business_user returns false for revoked member'
 );
 
 select * from finish();
