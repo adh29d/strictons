@@ -1,0 +1,117 @@
+name: db / deploy to prod
+
+# Manual dispatch only. There is no automatic trigger; prod migrations are
+# always reviewed by a human before they apply.
+#
+# Required GitHub setup before this workflow can succeed (see
+# packages/db/README.md for the full runbook):
+#   1. Create the strictons-prod Supabase project.
+#   2. Add repository secret SUPABASE_DB_URL_PROD with the prod connection
+#      string (Settings > Secrets and variables > Actions).
+#   3. Create a GitHub Environment named `production-database` with at least
+#      one required reviewer (Settings > Environments).
+#
+# Until those are configured, the workflow file is inert: dispatching it
+# fails fast with a clear message rather than running against a misconfigured
+# target.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy to prod" to confirm. Anything else aborts.'
+        required: true
+        type: string
+
+concurrency:
+  group: db-deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  diff:
+    name: diff against strictons-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Confirmation gate
+        run: |
+          if [ "${{ inputs.confirm }}" != "deploy to prod" ]; then
+            echo "::error::Confirmation phrase did not match. Aborting."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Supabase CLI is available
+        working-directory: packages/db
+        run: pnpm exec supabase --version
+
+      - name: Diff migrations vs strictons-prod
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL_PROD" ]; then
+            echo "::error::SUPABASE_DB_URL_PROD repository secret is not configured."
+            echo "::error::See packages/db/README.md for the prod-provisioning runbook."
+            exit 1
+          fi
+          {
+            echo "## Migration diff against strictons-prod"
+            echo ""
+            echo '```sql'
+            pnpm exec supabase db diff --db-url "$SUPABASE_DB_URL_PROD" --schema public || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  push:
+    name: supabase db push (strictons-prod)
+    needs: diff
+    runs-on: ubuntu-latest
+    environment: production-database
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to strictons-prod
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL_PROD" ]; then
+            echo "::error::SUPABASE_DB_URL_PROD repository secret is not configured."
+            exit 1
+          fi
+          pnpm exec supabase db push --db-url "$SUPABASE_DB_URL_PROD" --include-all

@@ -1,0 +1,85 @@
+name: db / pgTAP + types drift
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/db-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/db/**'
+      - '.github/workflows/db-test.yml'
+
+concurrency:
+  group: db-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pgtap:
+    name: pgTAP suites + types drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install repo dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pg_prove (Perl TAP harness for pgTAP)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libtap-parser-sourcehandler-pgtap-perl \
+            postgresql-client
+
+      - name: Verify Supabase CLI is available
+        working-directory: packages/db
+        run: pnpm exec supabase --version
+
+      - name: Start local Supabase
+        working-directory: packages/db
+        run: pnpm exec supabase start
+
+      - name: Regenerate TypeScript types
+        # Runs BEFORE the pgTAP suites. The suites' _setup.sql installs the
+        # pgtap extension, which adds tap_funky and pg_all_foreign_keys
+        # relations into the public schema. If gen:types runs after that
+        # install, those pgTAP-internal relations leak into the application's
+        # generated types. Generating first keeps the output to our schema.
+        working-directory: packages/db
+        run: pnpm gen:types
+
+      - name: Verify no types drift
+        working-directory: packages/db
+        run: |
+          if ! git diff --exit-code -- src/database.types.ts; then
+            echo "::error::Generated types differ from committed src/database.types.ts."
+            echo "::error::Run \`pnpm --filter @strictons/db gen:types\` locally and commit the result."
+            exit 1
+          fi
+
+      - name: Run pgTAP suites
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: pnpm db:test
+
+      - name: Stop local Supabase
+        if: always()
+        working-directory: packages/db
+        run: pnpm exec supabase stop || true

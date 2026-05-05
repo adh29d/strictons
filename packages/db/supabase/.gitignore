@@ -1,0 +1,4 @@
+# Supabase CLI local artefacts
+.branches/
+.temp/
+# seed.sql is checked in; it's our static reference data.

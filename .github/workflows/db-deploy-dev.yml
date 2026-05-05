@@ -1,0 +1,54 @@
+name: db / deploy to dev
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/db/supabase/migrations/**'
+      - 'packages/db/supabase/seed.sql'
+      - 'packages/db/supabase/config.toml'
+      - '.github/workflows/db-deploy-dev.yml'
+
+concurrency:
+  group: db-deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  push:
+    name: supabase db push (strictons-dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Supabase CLI is available
+        working-directory: packages/db
+        run: pnpm exec supabase --version
+
+      - name: Apply migrations to strictons-dev
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL_DEV: ${{ secrets.SUPABASE_DB_URL_DEV }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL_DEV" ]; then
+            echo "::error::SUPABASE_DB_URL_DEV repository secret is not configured."
+            echo "::error::Add it under Settings > Secrets and variables > Actions before this workflow can run."
+            exit 1
+          fi
+          pnpm exec supabase db push --db-url "$SUPABASE_DB_URL_DEV" --include-all

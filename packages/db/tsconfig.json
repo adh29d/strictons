@@ -1,0 +1,8 @@
+{
+  "extends": "@strictons/config-tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs"]
+}
