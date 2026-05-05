@@ -8,7 +8,9 @@
     "./client": "./src/client.ts",
     "./server": "./src/server.ts",
     "./browser": "./src/browser.ts",
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./roles": "./src/roles.ts",
+    "./auth-types": "./src/auth-types.ts"
   },
   "scripts": {
     "db:start": "supabase start",
