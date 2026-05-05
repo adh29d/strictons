@@ -74,6 +74,7 @@ This is the lived-experience companion to `git log` — the latter records what 
 - **`auth.users` vs `public.users` ordering.** Test fixtures must seed `auth.users` first to satisfy the FK from `public.users.id`. The `on_auth_user_created` trigger (`SECURITY DEFINER`) handles the `public.users` insert automatically — seeders should only insert into `auth.users` and never double-insert.
 - **`information_schema.role_table_grants` reports a row per table when ANY column has the privilege, including views and column-level grants.** When auditing, expect column-restricted UPDATEs (e.g. `hotels.contact_email`) to appear at the table level — back-check via `pg_policies` to confirm a policy permits the role, not just by counting rows.
 - **`pg_policies.cmd` is full-name strings (`'INSERT'`, `'UPDATE'`, `'DELETE'`, `'SELECT'`, `'ALL'`)** in modern Postgres / Supabase, despite older docs implying single-character codes (`r`/`a`/`w`/`d`/`*`). Match against full names in audit queries.
+- **Append-only is a rule that earns itself.** A migration that has never reached green CI may be edited on its branch because no environment has been affected by it. We hit this when migration 4 (`businesses.sql`) failed parse-time on a subquery-in-CHECK; the cleanest fix was editing the offending file rather than adding a fix-forward against a table that never got created. The carve-out is now in `packages/db/README.md`.
 
 ### What's deferred
 
