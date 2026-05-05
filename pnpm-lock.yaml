@@ -176,6 +176,12 @@ importers:
 
   apps/partners:
     dependencies:
+      '@strictons/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@strictons/email':
+        specifier: workspace:*
+        version: link:../../packages/email
       '@strictons/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -222,6 +228,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)
 
   packages/config/eslint:
     dependencies:
