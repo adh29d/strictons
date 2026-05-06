@@ -58,58 +58,12 @@ export async function getMembershipSet(
       .is('revoked_at', null),
   ]);
 
-  // [diagnostic-c10] Verbose per-query logging so we can ground-truth
-  // which query path failed in production preview. Logs include data
-  // shape (data presence + row count) and the FULL error object when
-  // present (PostgrestError carries {message, details, hint, code} as
-  // a plain object, not an Error subclass). Remove once the regression
-  // is diagnosed.
-  console.info('[diagnostic-c10][roles] getMembershipSet query results', {
-    userId,
-    users: {
-      hasData: userResult.data !== null,
-      data: userResult.data,
-      error: userResult.error,
-    },
-    hotel_users: {
-      hasData: hotelResult.data !== null,
-      rowCount: Array.isArray(hotelResult.data) ? hotelResult.data.length : null,
-      data: hotelResult.data,
-      error: hotelResult.error,
-    },
-    business_users: {
-      hasData: businessResult.data !== null,
-      rowCount: Array.isArray(businessResult.data) ? businessResult.data.length : null,
-      data: businessResult.data,
-      error: businessResult.error,
-    },
-  });
-
-  if (userResult.error) {
-    console.error('[diagnostic-c10][roles] throwing on userResult.error', {
-      error: userResult.error,
-    });
-    throw userResult.error;
-  }
+  if (userResult.error) throw userResult.error;
   if (!userResult.data) {
-    console.error(
-      '[diagnostic-c10][roles] throwing on !userResult.data — user not found in public.users (RLS-filtered or row missing)',
-      { userId },
-    );
     throw new Error(`getMembershipSet: user ${userId} not found in public.users`);
   }
-  if (hotelResult.error) {
-    console.error('[diagnostic-c10][roles] throwing on hotelResult.error', {
-      error: hotelResult.error,
-    });
-    throw hotelResult.error;
-  }
-  if (businessResult.error) {
-    console.error('[diagnostic-c10][roles] throwing on businessResult.error', {
-      error: businessResult.error,
-    });
-    throw businessResult.error;
-  }
+  if (hotelResult.error) throw hotelResult.error;
+  if (businessResult.error) throw businessResult.error;
 
   const roles: PartnerRole[] = [];
 

@@ -32,30 +32,9 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     try {
       memberships = await getMembershipSet(supabase, user.id);
     } catch (cause) {
-      // [diagnostic-c10] The original log only carried .message which
-      // misses important fields when the throw is a PostgrestError
-      // (object-shaped, not Error-subclass) or when it's the
-      // "user not found in public.users" Error from roles.ts. Verbose
-      // shape lets us tell which throw path fired and what Supabase
-      // actually returned. Remove once the regression is diagnosed.
-      const causeShape =
-        cause === null || cause === undefined
-          ? null
-          : typeof cause === 'object'
-            ? Object.getOwnPropertyNames(cause).reduce<Record<string, unknown>>((acc, k) => {
-                acc[k] = (cause as Record<string, unknown>)[k];
-                return acc;
-              }, {})
-            : { value: String(cause) };
       console.error('[middleware] getMembershipSet failed; failing closed', {
         userId: user.id,
-        userEmail: user.email ?? null,
-        path: url.pathname,
-        causeIsError: cause instanceof Error,
-        causeName: cause instanceof Error ? cause.name : null,
-        causeMessage: cause instanceof Error ? cause.message : null,
-        causeStack: cause instanceof Error ? cause.stack : null,
-        causeShape,
+        cause: cause instanceof Error ? cause.message : String(cause),
       });
       // Fail closed: if we can't determine memberships, treat as
       // no-access rather than letting the user through unscoped.
