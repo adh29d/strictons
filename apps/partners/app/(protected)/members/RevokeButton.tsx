@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
-import { revokeMember, type ActionState } from './actions';
+import { revokeMember } from './actions';
+import type { ActionState } from './types';
 
 const INITIAL: ActionState = {};
 

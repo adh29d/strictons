@@ -7,6 +7,7 @@ import { MAGIC_LINK_EXPIRY_MINUTES } from '@strictons/email/constants';
 import { SignInInputSchema } from '@strictons/types/auth';
 import { writeAuditLog } from '@/lib/audit';
 import { buildConfirmUrl, resolvePartnersUrl } from '@/lib/auth-link';
+import type { SignInState } from './types';
 
 /**
  * Environment-variable convention.
@@ -19,12 +20,13 @@ import { buildConfirmUrl, resolvePartnersUrl } from '@/lib/auth-link';
  * inside the function defers evaluation to first call, where a missing
  * var fails loudly with an actionable error and the dead-code
  * elimination boundary is unaffected.
+ *
+ * 'use server' rule: every export from this module must be an async
+ * function. Type-only exports (TS-erased) and value re-exports are not
+ * allowed — Next's runtime checker throws "A 'use server' file can only
+ * export async functions, found object" on module load otherwise.
+ * Move types to ./types.ts and constants to a non-'use server' sibling.
  */
-
-export type SignInState = {
-  error?: string;
-  emailEcho?: string;
-};
 
 const INITIAL_STATE: SignInState = {};
 

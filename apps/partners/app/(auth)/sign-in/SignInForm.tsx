@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
-import { signInWithEmail, type SignInState } from './actions';
+import { signInWithEmail } from './actions';
+import type { SignInState } from './types';
 
 const INITIAL_STATE: SignInState = {};
 

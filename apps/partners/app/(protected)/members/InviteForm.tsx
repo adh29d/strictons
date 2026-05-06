@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
-import { inviteBusinessMember, inviteHotelMember, type ActionState } from './actions';
+import { inviteBusinessMember, inviteHotelMember } from './actions';
+import type { ActionState } from './types';
 
 const INITIAL: ActionState = {};
 

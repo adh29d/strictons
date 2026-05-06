@@ -8,20 +8,20 @@ import {
   RevokeMemberInputSchema,
 } from '@strictons/types/invites';
 import { writeAuditLog } from '@/lib/audit';
+import type { ActionState } from './types';
 
 /**
  * Environment-variable convention.
  *
  * Env vars are read inside the Supabase client factories (server.ts /
  * client.ts), never at this module's top level.
+ *
+ * 'use server' rule: every export from this module must be an async
+ * function. Type-only exports (TS-erased) and value re-exports are not
+ * allowed — Next's runtime checker throws "A 'use server' file can only
+ * export async functions, found object" on module load otherwise.
+ * Move types to ./types.ts and constants to a non-'use server' sibling.
  */
-
-export type ActionState = {
-  ok?: true;
-  error?: string;
-};
-
-const INITIAL_STATE: ActionState = {};
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -292,5 +292,3 @@ export async function revokeMember(_prev: ActionState, formData: FormData): Prom
 
   return { ok: true };
 }
-
-export { INITIAL_STATE as MEMBERS_INITIAL_STATE };
