@@ -6,11 +6,7 @@ import { sendMagicLink, EmailSendError } from '@strictons/email/send';
 import { MAGIC_LINK_EXPIRY_MINUTES } from '@strictons/email/constants';
 import { SignInInputSchema } from '@strictons/types/auth';
 import { writeAuditLog } from '@/lib/audit';
-import {
-  buildConfirmUrl,
-  maskGenerateLinkResponseForVerification,
-  resolvePartnersUrl,
-} from '@/lib/auth-link';
+import { buildConfirmUrl, resolvePartnersUrl } from '@/lib/auth-link';
 
 /**
  * Environment-variable convention.
@@ -72,27 +68,14 @@ export async function signInWithEmail(
       throw generateError;
     }
 
-    // ┌─────────────────────────────────────────────────────────────────┐
-    // │  C1 EMPIRICAL VERIFICATION (commit 8 first push only)            │
-    // │                                                                  │
-    // │  Logs the masked admin.generateLink response shape so we can    │
-    // │  confirm (a) which field carries the token_hash, (b) which     │
-    // │  `type` value GoTrue accepts when the partner Route Handler    │
-    // │  later calls verifyOtp({type, token_hash}). The plan codes      │
-    // │  against properties.hashed_token + type='email'; this log       │
-    // │  proves or refutes that pairing against the actual local       │
-    // │  Supabase image. Removed at commit 9 (or earlier follow-up)     │
-    // │  once the shape is locked in. See PR description.               │
-    // └─────────────────────────────────────────────────────────────────┘
-    console.info(
-      '[c1-verify] admin.generateLink response shape (masked):',
-      JSON.stringify(maskGenerateLinkResponseForVerification(data), null, 2),
-    );
-
+    // C1 verification (commit 8) confirmed the response shape:
+    // properties.hashed_token carries the value verifyOtp consumes
+    // alongside type='email'. The masked-response log used to live
+    // here was removed at commit 10 once the shape was locked in.
     const tokenHash = (data?.properties as { hashed_token?: string } | undefined)?.hashed_token;
     if (!tokenHash) {
       throw new Error(
-        'admin.generateLink response missing properties.hashed_token; the C1-verification round revealed an unexpected shape',
+        'admin.generateLink response missing properties.hashed_token; Supabase response shape changed unexpectedly',
       );
     }
 
