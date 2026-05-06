@@ -72,9 +72,18 @@ describe('InviteBusinessMemberInputSchema', () => {
 });
 
 describe('RevokeMemberInputSchema', () => {
-  it('parses a valid payload', () => {
+  it('parses a valid hotel-scoped payload', () => {
     const result = RevokeMemberInputSchema.safeParse({
       membershipId: MEMBERSHIP_ID,
+      scope: 'hotel',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('parses a valid business-scoped payload', () => {
+    const result = RevokeMemberInputSchema.safeParse({
+      membershipId: MEMBERSHIP_ID,
+      scope: 'business',
     });
     expect(result.success).toBe(true);
   });
@@ -82,12 +91,28 @@ describe('RevokeMemberInputSchema', () => {
   it('rejects a non-uuid membershipId', () => {
     const result = RevokeMemberInputSchema.safeParse({
       membershipId: 'not-a-uuid',
+      scope: 'hotel',
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects a missing membershipId', () => {
-    const result = RevokeMemberInputSchema.safeParse({});
+    const result = RevokeMemberInputSchema.safeParse({ scope: 'hotel' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unknown scope', () => {
+    const result = RevokeMemberInputSchema.safeParse({
+      membershipId: MEMBERSHIP_ID,
+      scope: 'strictons',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing scope', () => {
+    const result = RevokeMemberInputSchema.safeParse({
+      membershipId: MEMBERSHIP_ID,
+    });
     expect(result.success).toBe(false);
   });
 });

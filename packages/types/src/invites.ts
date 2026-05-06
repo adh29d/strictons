@@ -34,11 +34,14 @@ export type InviteBusinessMemberInput = z.infer<typeof InviteBusinessMemberInput
  *
  * Consumed by `apps/partners/app/(protected)/members/actions.ts` (commit 11).
  *
- * The membership table the row belongs to (hotel_users vs business_users)
- * is encoded by which Server Action gets called, not by a discriminator
- * in this payload. Two separate actions, two separate routes.
+ * `scope` is a discriminator that tells the Server Action which table
+ * `membershipId` belongs to (`hotel_users` vs `business_users`). The
+ * partners-app revoke button passes it explicitly from the row's
+ * surrounding context — no need to look up which table the row lives
+ * in by trial-and-error against both tables.
  */
 export const RevokeMemberInputSchema = z.object({
   membershipId: z.uuid(),
+  scope: z.enum(['hotel', 'business']),
 });
 export type RevokeMemberInput = z.infer<typeof RevokeMemberInputSchema>;

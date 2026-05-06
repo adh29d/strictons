@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createServerClient } from '@strictons/db/server';
 import { getMembershipSet } from '@strictons/db/roles';
@@ -6,11 +7,10 @@ import type { PartnerRole } from '@strictons/db/auth-types';
 /**
  * Post-sign-in landing for the partners app.
  *
- * Phase 3 ships this as a placeholder per the plan §3 — header,
- * "Signed in as <email>", a list of roles, and a sign-out button.
- * The "Manage members" link is intentionally absent until commit 11
- * lands /members; surfacing a link that 404s is worse than not
- * surfacing it at all.
+ * Renders header, "Signed in as <email>", a list of roles, and a
+ * sign-out button. Admins (hotel_admin or business_admin) also see
+ * a "Manage members" link that points at /members?scope=<id> for
+ * their first admin scope.
  *
  * Middleware (commit 9) gates this route on (a) verified Supabase
  * auth and (b) at least one membership / strictons_staff. By the
@@ -41,6 +41,8 @@ export default async function HomePage(): Promise<React.ReactElement> {
     redirect('/no-access');
   }
 
+  const manageMembersHref = pickManageMembersHref(memberships.roles);
+
   return (
     <main className="mx-auto max-w-2xl p-8">
       <header className="mb-6">
@@ -61,11 +63,21 @@ export default async function HomePage(): Promise<React.ReactElement> {
         </ul>
       </section>
 
-      <form action="/sign-out" method="post">
-        <button type="submit" className="rounded bg-neutral-900 px-4 py-2 text-white">
-          Sign out
-        </button>
-      </form>
+      <div className="flex gap-3">
+        {manageMembersHref ? (
+          <Link
+            href={manageMembersHref}
+            className="rounded border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-100"
+          >
+            Manage members
+          </Link>
+        ) : null}
+        <form action="/sign-out" method="post">
+          <button type="submit" className="rounded bg-neutral-900 px-4 py-2 text-white">
+            Sign out
+          </button>
+        </form>
+      </div>
     </main>
   );
 }
@@ -83,4 +95,22 @@ function formatRole(role: PartnerRole): string {
     case 'strictons_staff':
       return 'Strictons staff';
   }
+}
+
+/**
+ * Pick the first admin scope to point the "Manage members" link at.
+ * Returns null when the user has no admin role (the link is hidden in
+ * that case). The /members page itself runs an authority check on the
+ * scope-id from the URL — this helper only chooses a default URL.
+ */
+function pickManageMembersHref(roles: PartnerRole[]): string | null {
+  for (const role of roles) {
+    if (role.kind === 'hotel_admin') {
+      return `/members?hotel=${role.hotelId}`;
+    }
+    if (role.kind === 'business_admin') {
+      return `/members?business=${role.businessId}`;
+    }
+  }
+  return null;
 }
