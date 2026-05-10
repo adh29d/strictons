@@ -33,6 +33,7 @@
     "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
+    "@opentelemetry/api": "^1.9.1",
     "@strictons/config-eslint": "workspace:*",
     "@strictons/config-tsconfig": "workspace:*",
     "eslint": "^9.15.0",

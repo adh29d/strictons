@@ -12,6 +12,7 @@
     "clean": "rm -rf .next .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.52.0",
     "@strictons/db": "workspace:*",
     "@strictons/email": "workspace:*",
     "@strictons/types": "workspace:*",
