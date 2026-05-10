@@ -1,8 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { createServerClient } from '@strictons/db/server';
-import { getMembershipSet } from '@strictons/db/roles';
 import type { PartnerRole } from '@strictons/db/auth-types';
+import { requireAuthSnapshot } from '@/lib/auth-cache';
 
 /**
  * Post-sign-in landing for the partners app.
@@ -27,16 +26,7 @@ import type { PartnerRole } from '@strictons/db/auth-types';
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage(): Promise<React.ReactElement> {
-  const supabase = await createServerClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    redirect('/sign-in');
-  }
-
-  const memberships = await getMembershipSet(supabase, user.id);
+  const { memberships } = await requireAuthSnapshot();
   if (memberships.roles.length === 0 && !memberships.isStrictonsStaff) {
     redirect('/no-access');
   }

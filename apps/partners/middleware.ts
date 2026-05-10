@@ -72,6 +72,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
  *   _next/static, _next/image — Next.js build assets
  *   favicon.ico               — root favicon request
  *   sign-in, sign-in/*        — sign-in form + check-inbox + future variants
+ *   sign-out                  — POST-only Route Handler that clears the
+ *                                Supabase session. Must NOT be gated by
+ *                                middleware: a wedged user (no memberships)
+ *                                otherwise gets redirected to /no-access
+ *                                instead of signing out, with the redirect
+ *                                preserving POST and silently no-op'ing.
  *   auth/confirm              — session-establishment Route Handler;
  *                                cannot be gated behind auth or it can't
  *                                run at all
@@ -84,6 +90,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
  */
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|sign-in|auth/confirm|no-access|api/_test).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|sign-in|sign-out|auth/confirm|no-access|api/_test).*)',
   ],
 };

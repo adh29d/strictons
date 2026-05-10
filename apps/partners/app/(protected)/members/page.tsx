@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createServerClient } from '@strictons/db/server';
 import { getMembershipSet } from '@strictons/db/roles';
 import type { PartnerRole } from '@strictons/db/auth-types';
+import { requireAuthSnapshot } from '@/lib/auth-cache';
 import { InviteForm } from './InviteForm';
 import { RevokeButton } from './RevokeButton';
 
@@ -40,14 +41,7 @@ export default async function MembersPage({
 }): Promise<React.ReactElement> {
   const params = await searchParams;
 
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    redirect('/sign-in');
-  }
-  const memberships = await getMembershipSet(supabase, user.id);
+  const { user, memberships } = await requireAuthSnapshot();
 
   const adminScopes = memberships.roles.filter(
     (r) => r.kind === 'hotel_admin' || r.kind === 'business_admin',
@@ -75,7 +69,10 @@ export default async function MembersPage({
 
   // Read members of the active scope. RLS lets any member of the scope
   // SELECT all hotel_users / business_users rows of that scope, so an
-  // admin reads everyone.
+  // admin reads everyone. The supabase client here is a fresh instance;
+  // its auth context comes from the same request cookies as the cached
+  // getAuthSnapshot above, so RLS sees the same user.
+  const supabase = await createServerClient();
   const rows = await fetchScopeMembers(supabase, ctx);
   const sorted = sortMembers(rows);
   const userResolver = buildUserEmailResolver(rows, memberships);
