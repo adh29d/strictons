@@ -6,19 +6,18 @@
  * fingerprinting (line numbers from minified bundles); proper
  * symbolication via uploaded source maps is a later phase.
  *
- * The DSN is read inside this file's top-level init() call rather than
- * captured in a module-level const because:
+ * The DSN is read from `NEXT_PUBLIC_SENTRY_DSN` — Sentry DSNs are
+ * public credentials by design (embedded in client bundles wherever
+ * Sentry is used in any web app), so the NEXT_PUBLIC_ prefix is the
+ * correct shape. Server and edge init files read the same variable
+ * for consistency.
  *
- *   - if SENTRY_DSN is unset (local dev without a DSN configured), we
- *     want a silent no-op rather than a build- or import-time warning
- *   - Sentry's `init({ dsn: undefined })` is documented to be a no-op
- *
- * The C2 env-var-read-inside-function-body convention applies in spirit:
- * we only call init when DSN is actually set.
+ * Init only runs when DSN is set; otherwise silent no-op so local dev
+ * without a Sentry project configured doesn't error out.
  */
 import * as Sentry from '@sentry/nextjs';
 
-const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN;
+const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 if (dsn) {
   Sentry.init({
