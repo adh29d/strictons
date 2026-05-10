@@ -1,5 +1,4 @@
 import { isSafeNextPath } from '@/lib/auth-link';
-import { SentryTestButton } from './SentryTestButton';
 import { SignInForm } from './SignInForm';
 
 type SearchParams = Promise<{
@@ -38,8 +37,6 @@ export default async function SignInPage({
         </p>
       ) : null}
       <SignInForm next={safeNext} />
-      {/* TEMPORARY: removed after Sentry verification (Phase 3 commit 13). */}
-      <SentryTestButton />
     </main>
   );
 }
