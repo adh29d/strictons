@@ -1,0 +1,106 @@
+name: e2e / partners magic-link
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/partners/**'
+      - 'packages/db/**'
+      - 'packages/email/**'
+      - 'packages/types/**'
+      - '.github/workflows/e2e.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/partners/**'
+      - 'packages/db/**'
+      - 'packages/email/**'
+      - 'packages/types/**'
+      - '.github/workflows/e2e.yml'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    name: Playwright magic-link E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: apps/partners
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Boot local Supabase
+        working-directory: packages/db
+        run: pnpm exec supabase start
+
+      - name: Apply migrations to local Supabase
+        working-directory: packages/db
+        run: pnpm exec supabase db reset
+
+      # Pull the local Supabase URL + publishable + secret keys from
+      # `supabase status -o env`. The CLI emits shell-export lines, which
+      # we filter and append to GITHUB_ENV so subsequent steps see them.
+      # Mapping: API_URL → NEXT_PUBLIC_SUPABASE_URL,
+      #          ANON_KEY → NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      #          SERVICE_ROLE_KEY → SUPABASE_SECRET_KEY.
+      - name: Export Supabase env vars
+        working-directory: packages/db
+        run: |
+          set -euo pipefail
+          ENV_OUT=$(pnpm exec supabase status -o env)
+          API_URL=$(echo "$ENV_OUT" | grep '^API_URL=' | cut -d= -f2- | tr -d '"')
+          ANON_KEY=$(echo "$ENV_OUT" | grep '^ANON_KEY=' | cut -d= -f2- | tr -d '"')
+          SERVICE_KEY=$(echo "$ENV_OUT" | grep '^SERVICE_ROLE_KEY=' | cut -d= -f2- | tr -d '"')
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_SECRET_KEY=$SERVICE_KEY"
+            echo "NEXT_PUBLIC_PARTNERS_URL=http://localhost:3002"
+            echo "EMAIL_TRANSPORT=memory"
+            echo "E2E_MODE=1"
+            # SendGrid is mocked by the memory transport in E2E, but the
+            # SDK still reads SENDGRID_API_KEY on first send — placeholder
+            # keeps the env-var-fail-loud check happy.
+            echo "SENDGRID_API_KEY=SG.placeholder-not-used-in-e2e"
+          } >> "$GITHUB_ENV"
+
+      - name: Build partners app
+        run: pnpm --filter @strictons/partners build
+
+      - name: Run Playwright tests
+        working-directory: apps/partners
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/partners/playwright-report/
+          retention-days: 7
+
+      - name: Stop local Supabase
+        if: always()
+        working-directory: packages/db
+        run: pnpm exec supabase stop || true
