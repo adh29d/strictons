@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { withServerActionInstrumentation } from '@sentry/nextjs';
 import { createServerClient } from '@strictons/db/server';
 import { getMembershipSet } from '@strictons/db/roles';
@@ -31,6 +32,19 @@ import type { ActionState } from './types';
  * with a generic placeholder. `formData` is deliberately NOT passed
  * — it would attach every form field (including invitee emails) as a
  * Sentry event extra regardless of sendDefaultPii=false.
+ *
+ * Revalidation: every successful mutation calls revalidatePath('/members')
+ * before returning. Without this, the Server Action's response carries
+ * the action's return value but no updated RSC payload — so /members
+ * keeps rendering pre-mutation state until the next hard fetch, and
+ * even then is exposed to a click-vs-reload race (the next fetch can
+ * fire inside the Server Action's transaction window, before the
+ * UPDATE/INSERT has committed, returning stale data). revalidatePath
+ * gates the action's response on the re-render, which itself runs
+ * after the action body has fully completed — closing the race by
+ * construction. The earlier "reload the page to see the new row"
+ * UX hint in InviteForm is now redundant; updated in the same commit
+ * that added this comment.
  */
 
 // ----------------------------------------------------------------------------
@@ -140,6 +154,7 @@ export async function inviteHotelMember(
       after: { invited_email: email },
     });
 
+    revalidatePath('/members');
     return { ok: true };
   });
 }
@@ -194,6 +209,7 @@ export async function inviteBusinessMember(
       after: { invited_email: email },
     });
 
+    revalidatePath('/members');
     return { ok: true };
   });
 }
@@ -305,6 +321,7 @@ export async function revokeMember(_prev: ActionState, formData: FormData): Prom
       after: { revoked_at: revokedAt, revoked_by: userId },
     });
 
+    revalidatePath('/members');
     return { ok: true };
   });
 }
