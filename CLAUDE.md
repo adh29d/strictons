@@ -43,7 +43,7 @@ Shared code in `packages/`:
 - **Stop after each phase.** When a phase is complete, summarise what changed and what's next. Do not auto-continue to the next phase.
 - **Ask before installing dependencies.** Explain why each new package is needed and whether a lighter alternative exists.
 - **Never push to remote, never deploy, never run destructive database operations** without explicit confirmation.
-- **Run `pnpm typecheck` and `pnpm lint`** after meaningful changes. Fix issues before declaring a task done.
+- **Run `pnpm typecheck`, `pnpm lint`, and `pnpm format:check`** after meaningful changes. Fix issues before declaring a task done. CI runs all three; the local pre-push routine mirrors CI's gates so formatting drift, type errors, or lint failures don't surface for the first time in CI logs. (`format:check` was added to the local routine in Phase 5 after two files slipped through with prettier drift; Phase 4's lived practice was `typecheck + lint + tests` only.)
 - **Read the brief.** When in doubt about a product decision, re-read the relevant section of `STRICTONS_BRIEF.md` before guessing or asking.
 
 ## Code conventions
