@@ -156,6 +156,13 @@ test.describe('partners invite + revoke', () => {
     });
     await inviteeRowAccepted.getByRole('button', { name: HOTEL_ADMIN_BUTTON_LABEL }).click();
 
+    // Gate the reload on the Server Action's completion. RevokeButton
+    // renders "Member revoked." via state.ok once useActionState
+    // updates with the action's return value — by which time the DB
+    // UPDATE has committed and the revalidated RSC has been applied.
+    // Parallel to the InviteForm's "Invite created." gate above.
+    await expect(admin.getByText(/Member revoked/i)).toBeVisible();
+
     // The revoke Server Action calls revalidatePath('/members'), so
     // the page re-renders with fresh data as part of the action's
     // response. The reload here is belt-and-braces — it's harmless
