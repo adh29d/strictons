@@ -175,9 +175,7 @@ describe('sendHotelAdminMagicLink — generateLink failure', () => {
     });
     // The action under test throws `generateError` directly — emulate
     // the SDK by attaching an Error-shaped object as `error`.
-    client.auth.admin.generateLink = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: cause });
+    client.auth.admin.generateLink = vi.fn().mockResolvedValue({ data: null, error: cause });
     createServiceRoleClientMock.mockReturnValue(client);
 
     const { sendHotelAdminMagicLink } = await import('./hotel-admin-magic-link');

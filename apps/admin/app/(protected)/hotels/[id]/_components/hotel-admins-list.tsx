@@ -60,10 +60,7 @@ export async function HotelAdminsList({ hotelId }: Props): Promise<React.ReactEl
 
   if (error) {
     return (
-      <p
-        role="alert"
-        className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800"
-      >
+      <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
         Could not load hotel admins: {error.message}
       </p>
     );
