@@ -199,31 +199,46 @@ This step runs only during the first staff user's provisioning, to prove the run
 
 `dev-test@strictons.com` and "Test Beachcomber Hotel" were inserted via SQL Editor during Phase 3 commit-15 verification. Phase 3's PROJECT_LOG explicitly deferred their cleanup to this runbook.
 
-Run in SQL Editor:
+#### Why the test hotel row is NOT deleted
 
-```sql
--- 1. Drop hotel_users rows that reference the test user or the test hotel.
-delete from public.hotel_users
-where invited_email = 'dev-test@strictons.com'
-   or hotel_id in (select id from public.hotels where slug = 'test-beachcomber');
+Phase 2's locked decision makes `public.audit_log` append-only via a trigger blocking UPDATE and DELETE for every role (including service_role). The FK from `audit_log.entity_hotel_id` → `hotels.id` is `ON DELETE SET NULL`, which requires Postgres to UPDATE the audit rows whenever the referenced hotel is deleted. The trigger blocks that UPDATE, and the entire `DELETE FROM public.hotels` transaction rolls back with:
 
--- 2. Drop the test hotel itself. The slug used in Phase 3 was
---    'test-beachcomber' — confirm by querying first if uncertain:
---      select id, slug, name from public.hotels where slug like 'test-%';
-delete from public.hotels where slug = 'test-beachcomber';
-
--- 3. Drop the test user. Cascading the auth.users delete causes
---    on_auth_user_deleted to remove public.users via the FK.
---    Use the Dashboard's Authentication → Users → ... → Delete user
---    for `dev-test@strictons.com` rather than DELETE-ing auth.users
---    directly — same reason as step 2 of the create flow.
+```
+ERROR: audit_log is append-only; UPDATE not permitted
+SQL statement "UPDATE ONLY "public"."audit_log" SET "entity_hotel_id" = NULL WHERE $1 OPERATOR(pg_catalog.=) "entity_hotel_id""
 ```
 
-After the cleanup, verify:
+This is correct behaviour — the audit trail is meant to outlast the entities it references. The runbook adapts: the test hotel row stays in place. After this cleanup, "Test Beachcomber Hotel" is an orphan record — no `hotel_users` link it to anyone, no business records reference it, and no future audit rows can be written against it because no app surface mentions it. Future audit queries that need to filter to "real hotels" can exclude test rows by slug prefix (e.g. `where slug not like 'test-%'`).
 
-- `dev-test@strictons.com` can no longer sign in to either admin or partners (the magic link send still works — we send unconditionally per the user-enumeration mitigation — but the `/auth/confirm` step will fail OR succeed-into-`/no-access` because the user has no `public.users` row, no memberships, and no staff row).
-- `select count(*) from public.hotels where slug = 'test-beachcomber'` returns 0.
+This constraint applies to any `audit_log`-linked entity: deletes of hotels, businesses, candidate_businesses, etc. will fail with the same trigger error once any audit row has referenced them. The Phase 5+ hotel-delete UX is consequently soft-delete (a flag), never a hard DELETE.
+
+#### Steps
+
+Single Dashboard action, then verify.
+
+1. **Delete the test auth user via the Dashboard.** Authentication → Users → search `dev-test@strictons.com` → ⋯ → Delete user. This cascades through the user_id FKs:
+   - `public.users` row removed (via `on_auth_user_deleted` or the FK cascade)
+   - `public.hotel_users` rows where `user_id` points at the test user are removed automatically
+   - `auth.users` row removed
+
+   The `hotel_users` row with `invited_email = 'dev-test@strictons.com'` but a NULL `user_id` (Phase 3 invite that was never accepted) is unaffected by the cascade; if any such row exists, it's an orphan invite that can be removed with the SQL DELETE below, but is also harmless to leave (no policy permits an unauth user to do anything with it).
+
+2. **Optional** — drop any never-accepted invite for `dev-test@strictons.com` left behind:
+
+   ```sql
+   delete from public.hotel_users
+   where invited_email = 'dev-test@strictons.com'
+     and user_id is null;
+   ```
+
+   No DELETE on the test hotel — see "Why the test hotel row is NOT deleted" above.
+
+#### Verify
+
+- `dev-test@strictons.com` can no longer sign in to either admin or partners (the magic link send still works — we send unconditionally per the user-enumeration mitigation — but the `/auth/confirm` step will fail to establish a `public.users` row because the auth.users record is gone).
+- `select count(*) from auth.users where email = 'dev-test@strictons.com'` returns 0.
 - `select count(*) from public.hotel_users where invited_email = 'dev-test@strictons.com'` returns 0.
+- `select id, slug, name from public.hotels where slug = 'test-beachcomber'` still returns the row — that's intentional. Confirm there are no `hotel_users` references: `select count(*) from public.hotel_users where hotel_id = (select id from public.hotels where slug = 'test-beachcomber')` returns 0.
 
 Once verified, this section of the runbook is done forever. Subsequent staff provisioning skips it.
 
