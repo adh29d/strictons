@@ -155,12 +155,51 @@ test.describe('partners invite + revoke', () => {
       void dialog.accept();
     });
     await inviteeRowAccepted.getByRole('button', { name: HOTEL_ADMIN_BUTTON_LABEL }).click();
+    // [DIAG-REVOKE] timestamp the click for time-correlation with the
+    // service-role read below.
+    console.log('[diag-revoke] post-click', { ts: new Date().toISOString() });
 
     // After revoke, the row should render in revoked state. The page
     // re-renders via Server Action + Next's revalidation, but the
     // RevokeButton uses useActionState without a revalidate(), so a
     // reload is the simplest way to read fresh server state.
     await admin.reload();
+    console.log('[diag-revoke] post-reload', { ts: new Date().toISOString() });
+
+    // [DIAG-REVOKE] Ground-truth row state from DB via service-role.
+    // Answers: did the Server Action persist the revoke before the
+    // failing assertion below? Temporary — reverted once the root
+    // cause is identified.
+    {
+      const diagService = createServiceRoleClient();
+      const { data: diagRow, error: diagErr } = await diagService
+        .from('hotel_users')
+        .select('id, user_id, accepted_at, revoked_at, revoked_by')
+        .eq('hotel_id', hotelId)
+        .eq('invited_email', inviteeEmail)
+        .maybeSingle();
+      console.log('[diag-revoke] db-row', {
+        ts: new Date().toISOString(),
+        diagRow,
+        diagErr: diagErr?.message ?? null,
+      });
+    }
+
+    // [DIAG-REVOKE] Ground-truth UI state — dump the visible <li>'s
+    // inner text so we see what Playwright is matching against.
+    {
+      const lis = await admin.getByRole('listitem').all();
+      const dump: { idx: number; text: string }[] = [];
+      for (let i = 0; i < lis.length; i++) {
+        const t = (await lis[i]!.innerText()).replace(/\s+/g, ' ').trim();
+        dump.push({ idx: i, text: t });
+      }
+      console.log('[diag-revoke] ui-listitems', {
+        ts: new Date().toISOString(),
+        dump,
+      });
+    }
+
     const inviteeRowRevoked = admin.getByRole('listitem').filter({ hasText: inviteeEmail });
     await expect(inviteeRowRevoked.getByText(/Revoked on/i)).toBeVisible();
 
