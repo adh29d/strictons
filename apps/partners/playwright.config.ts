@@ -44,9 +44,10 @@ export default defineConfig({
     url: 'http://localhost:3002/sign-in',
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
-    // DIAGNOSTIC (commit 14 failure investigation): surface webServer
-    // stdout/stderr to the CI log so the [diag][...] traces from the
-    // Server Action, route handler, and memory transport are visible.
+    // Surface webServer stdout/stderr to the CI log. Default would
+    // suppress them; piping makes Server Action / Route Handler logs
+    // visible when a test fails and console.error stack traces from
+    // the partners app reach the Playwright report.
     stdout: 'pipe',
     stderr: 'pipe',
     env: {

@@ -6,29 +6,26 @@ import type { EmailTransport, RenderedEmail } from './types';
  * Route Handler in apps/partners (`/api/test/last-email`, only mounted
  * when E2E_MODE=1).
  *
- * Module-level singleton: every caller sees the same buffer. Tests that
- * need isolation use `clearMemoryInbox()` between cases.
+ * Inbox storage: keyed off `globalThis` via `Symbol.for(...)` rather than
+ * a module-level `const`. Next.js production builds load this module
+ * separately for each runtime entry point — a Server Action chunk and
+ * a Route Handler chunk import the same source file but receive their
+ * own module instance, and a plain module-local array would mean the
+ * writer and reader operate on disjoint buffers. The shared symbol
+ * registry on `globalThis` survives that split because both module
+ * instances resolve the same symbol identity.
  */
-const inbox: RenderedEmail[] = [];
+const INBOX_KEY = Symbol.for('strictons.email.memory.inbox');
 
-// DIAGNOSTIC (commit 14 failure investigation): per-module-load id so
-// writer-vs-reader logs can disambiguate the "two-module-copies"
-// hypothesis. If push and read log different ids, Next bundled this
-// transport twice and each copy owns its own inbox. Gated on
-// E2E_MODE=1 so vitest unit tests (which don't set it) stay quiet.
-const MODULE_ID = `mem-${Math.random().toString(36).slice(2, 10)}`;
-const DIAG = process.env.E2E_MODE === '1';
-if (DIAG) console.log(`[diag][memory] module loaded id=${MODULE_ID}`);
+type GlobalWithInbox = { [INBOX_KEY]?: RenderedEmail[] };
+const g = globalThis as GlobalWithInbox;
+const inbox: RenderedEmail[] = (g[INBOX_KEY] ??= []);
 
 export function createMemoryTransport(): EmailTransport {
   return {
     name: 'memory',
     async send(message: RenderedEmail): Promise<void> {
       inbox.push(message);
-      if (DIAG)
-        console.log(
-          `[diag][memory] push id=${MODULE_ID} to=${message.to} length_after=${inbox.length}`,
-        );
     },
   };
 }
@@ -38,7 +35,6 @@ export function readMemoryInbox(): readonly RenderedEmail[] {
 }
 
 export function findMemoryInboxEntry(toEmail: string): RenderedEmail | undefined {
-  if (DIAG) console.log(`[diag][memory] read id=${MODULE_ID} to=${toEmail} length=${inbox.length}`);
   // Most recent send to this address wins — multiple sign-in attempts
   // share an inbox; the test cares about the latest link.
   for (let i = inbox.length - 1; i >= 0; i--) {

@@ -48,10 +48,6 @@ export async function signInWithEmail(
   const { email, next: parsedNext } = parsed.data;
   const next = parsedNext ?? '/';
 
-  console.log(
-    `[diag][signin] action start email=${email} EMAIL_TRANSPORT=${JSON.stringify(process.env.EMAIL_TRANSPORT)} E2E_MODE=${JSON.stringify(process.env.E2E_MODE)}`,
-  );
-
   // Generate the magic-link token via service-role, then send the email
   // ourselves via SendGrid. Errors translate into a user-safe state and
   // an audit-log entry; success exits via redirect() (which throws a
@@ -70,9 +66,6 @@ export async function signInWithEmail(
     });
 
     if (generateError) {
-      console.log(
-        `[diag][signin] generateLink ERROR name=${generateError.name} status=${generateError.status} message=${generateError.message}`,
-      );
       // Bubble into the catch below so audit-logging is centralised.
       throw generateError;
     }
@@ -95,23 +88,11 @@ export async function signInWithEmail(
       next,
     });
 
-    console.log(
-      `[diag][signin] generateLink ok, about to sendMagicLink to=${email} link_host=${(() => {
-        try {
-          return new URL(link).host;
-        } catch {
-          return 'parse-failed';
-        }
-      })()}`,
-    );
-
     await sendMagicLink({
       to: email,
       link,
       expiresInMinutes: MAGIC_LINK_EXPIRY_MINUTES,
     });
-
-    console.log(`[diag][signin] sendMagicLink returned to=${email}`);
 
     await writeAuditLog({
       actor_user_id: null,
@@ -127,9 +108,6 @@ export async function signInWithEmail(
 
     sendSucceeded = true;
   } catch (cause) {
-    console.log(
-      `[diag][signin] catch fired type=${cause instanceof Error ? cause.constructor.name : typeof cause} message=${cause instanceof Error ? cause.message : String(cause)}`,
-    );
     // C7 shape: actor anonymous, entity_type 'auth_attempt', entity_id
     // a fresh uuid, after carries the failure reason. Useful security
     // signal for credential-stuffing or "user thinks they're invited
