@@ -144,6 +144,89 @@ The prod-deploy workflow is inert until provisioning is complete.
 5. **Dispatch a dry-run** of `db-deploy-prod.yml` with confirm string `"deploy to prod"` to verify the diff job runs cleanly. The push job will pause for approval; you can cancel without applying.
 6. **Apply the baseline** by dispatching the workflow again, this time letting the push job proceed through approval. After this, every subsequent dispatch applies only new migrations.
 
+## Provisioning a Strictons staff user (run once per new staff member)
+
+Strictons staff are members of `public.strictons_staff`. The table's write side is service-role only (Phase 2 locked decision; no `FOR ALL to authenticated using is_strictons_staff()` write policy exists), so a new staff user is created out-of-band via this runbook rather than from inside any app.
+
+Phase 4 commit 7 introduces this runbook. The **first** execution provisions Steven's own real staff user and, as its final step, removes the Phase 3 test data (`dev-test@strictons.com`, "Test Beachcomber Hotel", and the membership rows linking them). That cleanup runs once, during the first staff provisioning, to prove the runbook works before any future staff provisioning relies on it.
+
+The runbook targets `strictons-dev`. For `strictons-prod` once that exists, the steps are identical — just point at the prod project's Supabase Dashboard.
+
+### Steps
+
+1. **Open the target Supabase project** in the Dashboard (https://supabase.com/dashboard). For Phase 4, this is `strictons-dev`.
+
+2. **Create the auth.users row via the Dashboard.** Authentication → Users → Add user → Send invitation. Enter the staff member's email. Check **Auto Confirm User** so they don't need to click a Supabase-templated confirmation email — we ship our own magic links from `welcome@strictons.com` via SendGrid, so the Supabase default email is disabled.
+
+   Do NOT INSERT into `auth.users` via SQL. The auth schema is managed by GoTrue and direct INSERTs skip the password / metadata defaults GoTrue expects. The Dashboard's "Add user" flow is the supported path.
+
+   Important — Phase 2 ordering gotcha: when an auth.users row is created (via Dashboard, API, or the supported admin endpoints), the `on_auth_user_created` trigger (`SECURITY DEFINER`) AUTO-POPULATES the corresponding `public.users` row. **Never INSERT into `public.users` manually after this step.** Doing so would double-insert and either error on the primary key conflict or, worse, race the trigger.
+
+3. **Copy the new user's `id`** from the Dashboard's Users list (it's a UUID).
+
+4. **Insert into `public.strictons_staff`** via SQL Editor:
+
+   ```sql
+   insert into public.strictons_staff (user_id)
+   values ('<paste-user-id-here>')
+   on conflict (user_id) do nothing;
+   ```
+
+   `on conflict do nothing` makes the statement idempotent — re-running with the same id is a no-op rather than an error. Strictons-side writes to this table always run via the service-role / SQL Editor path, never from inside any app, so RLS does not gate this INSERT.
+
+5. **(Optional) Notify PostgREST of the schema reload** in case the staff status is not visible to the new user's first sign-in:
+
+   ```sql
+   notify pgrst, 'reload schema';
+   ```
+
+   Usually unnecessary for a row INSERT (vs a column or policy change), but the cost is zero and the symptom this prevents — first-sign-in `isStrictonsStaff: false` until the next reload — is hard to diagnose.
+
+6. **Verify the staff user can sign in.** Navigate to the admin app preview URL (or `admin.strictons.com` for production). Enter the staff member's email. Receive the magic link. Click it. Expected behaviour:
+
+   - `/auth/confirm` accepts the token and establishes the session
+   - Middleware reads `isStrictonsStaff: true` (commit 5's real query) and lets the request through
+   - The landing page at `/` renders with the staff member's email in the "Signed in as …" line
+   - The page is NOT `/no-access`
+
+   If the user lands on `/no-access`, the insertion into `public.strictons_staff` didn't apply or PostgREST hasn't reloaded the schema yet. Re-run step 5, then sign out and back in.
+
+7. **Confirm sign-out works.** Click "Sign out" on the landing. Expected: redirected to `/sign-in`. Visiting `/` after sign-out redirects back to `/sign-in?next=%2F`.
+
+### Final step (FIRST RUN ONLY) — remove the Phase 3 test data
+
+This step runs only during the first staff user's provisioning, to prove the runbook works end-to-end before any future staff user depends on it. Subsequent runs skip this entire section.
+
+`dev-test@strictons.com` and "Test Beachcomber Hotel" were inserted via SQL Editor during Phase 3 commit-15 verification. Phase 3's PROJECT_LOG explicitly deferred their cleanup to this runbook.
+
+Run in SQL Editor:
+
+```sql
+-- 1. Drop hotel_users rows that reference the test user or the test hotel.
+delete from public.hotel_users
+where invited_email = 'dev-test@strictons.com'
+   or hotel_id in (select id from public.hotels where slug = 'test-beachcomber');
+
+-- 2. Drop the test hotel itself. The slug used in Phase 3 was
+--    'test-beachcomber' — confirm by querying first if uncertain:
+--      select id, slug, name from public.hotels where slug like 'test-%';
+delete from public.hotels where slug = 'test-beachcomber';
+
+-- 3. Drop the test user. Cascading the auth.users delete causes
+--    on_auth_user_deleted to remove public.users via the FK.
+--    Use the Dashboard's Authentication → Users → ... → Delete user
+--    for `dev-test@strictons.com` rather than DELETE-ing auth.users
+--    directly — same reason as step 2 of the create flow.
+```
+
+After the cleanup, verify:
+
+- `dev-test@strictons.com` can no longer sign in to either admin or partners (the magic link send still works — we send unconditionally per the user-enumeration mitigation — but the `/auth/confirm` step will fail OR succeed-into-`/no-access` because the user has no `public.users` row, no memberships, and no staff row).
+- `select count(*) from public.hotels where slug = 'test-beachcomber'` returns 0.
+- `select count(*) from public.hotel_users where invited_email = 'dev-test@strictons.com'` returns 0.
+
+Once verified, this section of the runbook is done forever. Subsequent staff provisioning skips it.
+
 ## Phase 2 status
 
 Done. Schema covers every cluster called out in the brief plus the locked decisions (custom_domain on hotels, guides as analytics scope, audit_log denormalised columns, append-only triggers, premium-position uniqueness, print-state immutability, geo_confirmed reserved enum value, etc.). 10 pgTAP suites cover unauth, staff, hotel/business isolation, audit append-only, quality-clause, cross-tenant writes, service-role reads, print-state immutability, and premium-position uniqueness.
