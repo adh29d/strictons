@@ -155,86 +155,12 @@ test.describe('partners invite + revoke', () => {
       void dialog.accept();
     });
     await inviteeRowAccepted.getByRole('button', { name: HOTEL_ADMIN_BUTTON_LABEL }).click();
-    // [DIAG-REVOKE2] timing probe: when does the UPDATE actually
-    // commit relative to the click moment? Steven's first round
-    // confirmed it commits by the time the post-reload diagnostic
-    // runs, but didn't pin down whether the commit happens before
-    // or after admin.reload() fires. Two reads at fixed elapsed
-    // times answer that.
-    const clickTs = Date.now();
-    console.log('[diag-revoke2] post-click', { ts: new Date().toISOString() });
-
-    {
-      await new Promise((r) => setTimeout(r, 200));
-      const diagService = createServiceRoleClient();
-      const { data: row, error } = await diagService
-        .from('hotel_users')
-        .select('id, revoked_at, revoked_by, accepted_at')
-        .eq('hotel_id', hotelId)
-        .eq('invited_email', inviteeEmail)
-        .maybeSingle();
-      console.log('[diag-revoke2] db-at-200ms', {
-        elapsedMs: Date.now() - clickTs,
-        row,
-        error: error?.message ?? null,
-      });
-    }
-
-    {
-      // Total elapsed ~1000ms by the time this completes.
-      await new Promise((r) => setTimeout(r, 800));
-      const diagService = createServiceRoleClient();
-      const { data: row, error } = await diagService
-        .from('hotel_users')
-        .select('id, revoked_at, revoked_by, accepted_at')
-        .eq('hotel_id', hotelId)
-        .eq('invited_email', inviteeEmail)
-        .maybeSingle();
-      console.log('[diag-revoke2] db-at-1s', {
-        elapsedMs: Date.now() - clickTs,
-        row,
-        error: error?.message ?? null,
-      });
-    }
 
     // The revoke Server Action calls revalidatePath('/members'), so
     // the page re-renders with fresh data as part of the action's
     // response. The reload here is belt-and-braces — it's harmless
     // and protects against any future caching surprise.
     await admin.reload();
-    console.log('[diag-revoke2] post-reload', {
-      ts: new Date().toISOString(),
-      elapsedMs: Date.now() - clickTs,
-    });
-
-    // [DIAG-REVOKE2] DB state after the reload completes.
-    {
-      const diagService = createServiceRoleClient();
-      const { data: row, error } = await diagService
-        .from('hotel_users')
-        .select('id, revoked_at, revoked_by, accepted_at')
-        .eq('hotel_id', hotelId)
-        .eq('invited_email', inviteeEmail)
-        .maybeSingle();
-      console.log('[diag-revoke2] db-post-reload', {
-        row,
-        error: error?.message ?? null,
-      });
-    }
-
-    // [DIAG-REVOKE2] UI dump — innerText of every <li>. Answers
-    // whether the reloaded render reflects the now-committed state
-    // or still serves pre-revoke text.
-    {
-      const lis = await admin.getByRole('listitem').all();
-      const dump: { idx: number; text: string }[] = [];
-      for (let i = 0; i < lis.length; i++) {
-        const t = (await lis[i]!.innerText()).replace(/\s+/g, ' ').trim();
-        dump.push({ idx: i, text: t });
-      }
-      console.log('[diag-revoke2] ui-listitems', { dump });
-    }
-
     const inviteeRowRevoked = admin.getByRole('listitem').filter({ hasText: inviteeEmail });
     await expect(inviteeRowRevoked.getByText(/Revoked on/i)).toBeVisible();
 
