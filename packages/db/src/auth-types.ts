@@ -25,11 +25,22 @@ export type PartnerRole =
 
 /**
  * Aggregated membership view of a single user, returned by
- * `getMembershipSet`. An empty `roles` array represents the no-access
- * state — an authenticated user with no hotel or business membership.
+ * `getMembershipSet`.
  *
- * `isStrictonsStaff` is wired but always `false` in Phase 3; Phase 4's
- * admin-app commits will populate it from `public.strictons_staff`.
+ * No-access state depends on the app:
+ *   partners app: roles.length === 0 && !isStrictonsStaff
+ *   admin    app: !isStrictonsStaff
+ * — see decideAuth's allowWhen predicate in @strictons/db/auth-helpers
+ * for the canonical encoding.
+ *
+ * `isStrictonsStaff` is populated from `public.strictons_staff` via
+ * the RLS-enforced client from Phase 4 commit 5 onwards. The table's
+ * SELECT policy (`using (is_strictons_staff())`, SECURITY DEFINER)
+ * gates the row visibility: a non-staff user sees no rows and the
+ * flag is `false`; a staff user sees their own row and the flag is
+ * `true`. A user can simultaneously be Strictons staff AND a hotel /
+ * business member — both arrays / flags coexist, and the partners
+ * app surfaces both.
  */
 export type MembershipSet = {
   userId: string;

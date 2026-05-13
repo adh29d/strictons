@@ -273,16 +273,41 @@ describe('decideAuth', () => {
 
   describe('authenticated strictons_staff (partners predicate)', () => {
     it('lets a staff-only user through even with empty roles', () => {
-      // Phase 3 stubbed isStrictonsStaff at false; commit 5 wires the
-      // real query. The behavioural guarantee for the partners app
-      // doesn't change: staff-only users still pass the partners
-      // predicate. The dedicated regression test for the staff slot
-      // — "staff + hotel_admin still routes to next() in partners"
-      // — lands in commit 5 alongside the slot's first real value.
+      // Commit 5 wires getMembershipSet's isStrictonsStaff to a real
+      // query against public.strictons_staff. The partners predicate
+      // (roles.length > 0 || isStrictonsStaff) lets a staff-only user
+      // through on the second disjunct.
       expect(
         decideAuth({
           hasUser: true,
           memberships: staffOnly,
+          pathname: '/',
+          search: '',
+          allowWhen: partnersAllowWhen,
+        }),
+      ).toEqual({ kind: 'next' });
+    });
+
+    it('lets a user who is BOTH staff AND a hotel_admin through (cross-role regression)', () => {
+      // Commit 5 regression test (§5 of the approved plan). Before
+      // commit 5, isStrictonsStaff was hardcoded false, so a user
+      // who would be in this state was passing partners' allowWhen
+      // ONLY via the hotel_admin role. Once the slot becomes
+      // non-false, the predicate's first disjunct (roles.length > 0)
+      // is the path; this test confirms the second disjunct
+      // (isStrictonsStaff) does not interfere — both conditions
+      // hold, the user still routes to next(). Without this case,
+      // an accidental refactor of partnersAllowWhen from `||` to
+      // `&&` would pass every other decideAuth case but break the
+      // staff-AND-member intersection.
+      const both: MembershipSet = {
+        ...withHotel,
+        isStrictonsStaff: true,
+      };
+      expect(
+        decideAuth({
+          hasUser: true,
+          memberships: both,
           pathname: '/',
           search: '',
           allowWhen: partnersAllowWhen,

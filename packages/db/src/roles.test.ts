@@ -103,6 +103,7 @@ describe('getMembershipSet', () => {
         ],
         error: null,
       },
+      strictons_staff: { data: null, error: null },
     });
 
     const result = await getMembershipSet(supabase, USER_ID);
@@ -136,19 +137,48 @@ describe('getMembershipSet', () => {
       users: { data: { email: USER_EMAIL }, error: null },
       hotel_users: { data: [], error: null },
       business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: null },
     });
 
     const result = await getMembershipSet(supabase, USER_ID);
 
     expect(result.roles).toEqual([]);
     expect(result.isStrictonsStaff).toBe(false);
-    // Phase 3: never queries strictons_staff.
-    const tablesQueried = queries.map((q) => q.table);
-    expect(tablesQueried).not.toContain('strictons_staff');
+    // strictons_staff IS queried every call from commit 5 onwards;
+    // RLS gates the visibility for non-staff (own row = none).
+    expect(queries.map((q) => q.table)).toContain('strictons_staff');
   });
 
-  it('always returns isStrictonsStaff=false (Phase 3 — no strictons_staff query)', async () => {
+  it('returns isStrictonsStaff=true when the strictons_staff row is visible', async () => {
+    // Staff users see their own row via the RLS SELECT policy
+    // `using (is_strictons_staff())` (SECURITY DEFINER helper). Mocked
+    // here as data: { user_id }.
     const { supabase, queries } = makeMock({
+      users: { data: { email: USER_EMAIL }, error: null },
+      hotel_users: { data: [], error: null },
+      business_users: { data: [], error: null },
+      strictons_staff: { data: { user_id: USER_ID }, error: null },
+    });
+
+    const result = await getMembershipSet(supabase, USER_ID);
+
+    expect(result.isStrictonsStaff).toBe(true);
+    expect(result.roles).toEqual([]);
+
+    // Query shape: select user_id, filter on user_id = userId, maybeSingle.
+    const staffQuery = queries.find((q) => q.table === 'strictons_staff');
+    expect(staffQuery).toBeDefined();
+    const calls = staffQuery!.chain.map((c) => `${c.method}(${JSON.stringify(c.args)})`);
+    expect(calls).toContain(`eq(${JSON.stringify(['user_id', USER_ID])})`);
+  });
+
+  it('returns isStrictonsStaff=true AND populated roles for a staff user who is also a hotel admin', async () => {
+    // The cross-role case Steven called out in commit 5's prompt: a
+    // user who is both Strictons staff and a hotel admin should have
+    // BOTH the role entry AND the staff flag — decideAuth's partners
+    // allowWhen lets them through on either axis (regression test
+    // for that lives in auth-helpers.test.ts).
+    const { supabase } = makeMock({
       users: { data: { email: USER_EMAIL }, error: null },
       hotel_users: {
         data: [
@@ -161,12 +191,31 @@ describe('getMembershipSet', () => {
         error: null,
       },
       business_users: { data: [], error: null },
+      strictons_staff: { data: { user_id: USER_ID }, error: null },
     });
 
     const result = await getMembershipSet(supabase, USER_ID);
 
-    expect(result.isStrictonsStaff).toBe(false);
-    expect(queries.map((q) => q.table)).not.toContain('strictons_staff');
+    expect(result.isStrictonsStaff).toBe(true);
+    expect(result.roles).toEqual([
+      {
+        kind: 'hotel_admin',
+        hotelId: HOTEL_ID,
+        hotelSlug: 'alpha',
+        hotelName: 'Alpha Hotel',
+      },
+    ]);
+  });
+
+  it('throws when the strictons_staff query errors', async () => {
+    const { supabase } = makeMock({
+      users: { data: { email: USER_EMAIL }, error: null },
+      hotel_users: { data: [], error: null },
+      business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: new Error('staff query failed') },
+    });
+
+    await expect(getMembershipSet(supabase, USER_ID)).rejects.toThrow(/staff query failed/);
   });
 
   it('filters hotel_users on revoked_at IS NULL and accepted_at IS NOT NULL', async () => {
@@ -174,6 +223,7 @@ describe('getMembershipSet', () => {
       users: { data: { email: USER_EMAIL }, error: null },
       hotel_users: { data: [], error: null },
       business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: null },
     });
 
     await getMembershipSet(supabase, USER_ID);
@@ -193,6 +243,7 @@ describe('getMembershipSet', () => {
       users: { data: { email: USER_EMAIL }, error: null },
       hotel_users: { data: [], error: null },
       business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: null },
     });
 
     await getMembershipSet(supabase, USER_ID);
@@ -225,6 +276,7 @@ describe('getMembershipSet', () => {
         error: null,
       },
       business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: null },
     });
 
     const result = await getMembershipSet(supabase, USER_ID);
@@ -256,6 +308,7 @@ describe('getMembershipSet', () => {
         ],
         error: null,
       },
+      strictons_staff: { data: null, error: null },
     });
 
     const result = await getMembershipSet(supabase, USER_ID);
@@ -269,12 +322,13 @@ describe('getMembershipSet', () => {
       users: { data: null, error: null },
       hotel_users: { data: [], error: null },
       business_users: { data: [], error: null },
+      strictons_staff: { data: null, error: null },
     });
 
     await expect(getMembershipSet(supabase, USER_ID)).rejects.toThrow(/not found in public\.users/);
   });
 
-  it('runs the three queries in parallel (single Promise.all batch)', async () => {
+  it('runs the four queries in parallel (single Promise.all batch)', async () => {
     const resolvers = new Map<string, (v: TableResponse) => void>();
 
     const supabase = {
@@ -305,19 +359,21 @@ describe('getMembershipSet', () => {
 
     const promise = getMembershipSet(supabase, USER_ID);
 
-    // After a single microtask flush, all three from() calls must already
+    // After a single microtask flush, all four from() calls must already
     // have happened — proving the queries were issued in parallel rather
     // than sequentially. (Sequential awaits would only have called the
     // first from() at this point.)
     await Promise.resolve();
-    expect(supabase.from).toHaveBeenCalledTimes(3);
+    expect(supabase.from).toHaveBeenCalledTimes(4);
     expect(resolvers.has('users')).toBe(true);
     expect(resolvers.has('hotel_users')).toBe(true);
     expect(resolvers.has('business_users')).toBe(true);
+    expect(resolvers.has('strictons_staff')).toBe(true);
 
     resolvers.get('users')!({ data: { email: USER_EMAIL }, error: null });
     resolvers.get('hotel_users')!({ data: [], error: null });
     resolvers.get('business_users')!({ data: [], error: null });
+    resolvers.get('strictons_staff')!({ data: null, error: null });
 
     const result = await promise;
     expect(result.email).toBe(USER_EMAIL);
