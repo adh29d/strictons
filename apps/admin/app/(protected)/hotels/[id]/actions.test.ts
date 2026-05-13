@@ -223,7 +223,6 @@ describe('inviteHotelAdmin', () => {
     const state = await inviteHotelAdmin({}, makeFormDataInvite());
 
     expect(state.error).toBe('Hotel not found.');
-    expect(state.emailEcho).toBe(INVITEE_EMAIL);
     expect(sendHotelAdminMagicLinkMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
 
@@ -253,7 +252,6 @@ describe('inviteHotelAdmin', () => {
     expect(state.ok).toBeUndefined();
     expect(state.fieldErrors?.email).toContain('already on this hotel');
     expect(state.fieldErrors?.email).toContain('Resend portal access link');
-    expect(state.emailEcho).toBe(INVITEE_EMAIL);
     expect(sendHotelAdminMagicLinkMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
 

@@ -74,10 +74,7 @@ export async function inviteHotelAdmin(
         hotelId: rawHotelId,
       });
       if (!parsed.success) {
-        return {
-          error: 'Please enter a valid email address.',
-          emailEcho: rawEmail,
-        };
+        return { error: 'Please enter a valid email address.' };
       }
       const { email, hotelId } = parsed.data;
 
@@ -105,7 +102,7 @@ export async function inviteHotelAdmin(
             message: hotelLookupError?.message ?? null,
           },
         });
-        return { error: 'Hotel not found.', emailEcho: email };
+        return { error: 'Hotel not found.' };
       }
 
       // ---- INSERT hotel_users row with is_admin: true explicit ----
@@ -147,7 +144,6 @@ export async function inviteHotelAdmin(
               email:
                 "This email is already on this hotel; use 'Resend portal access link' instead.",
             },
-            emailEcho: email,
           };
         }
 
@@ -164,7 +160,7 @@ export async function inviteHotelAdmin(
             message: insertError?.message ?? 'unknown',
           },
         });
-        return { error: 'Could not create invitation. Please try again.', emailEcho: email };
+        return { error: 'Could not create invitation. Please try again.' };
       }
 
       // ---- Send the magic link ----
@@ -190,7 +186,7 @@ export async function inviteHotelAdmin(
             message: cause instanceof Error ? cause.message : String(cause),
           },
         });
-        return { error: 'Could not send invitation. Please try again.', emailEcho: email };
+        return { error: 'Could not send invitation. Please try again.' };
       }
 
       // ---- Success ----

@@ -70,7 +70,6 @@ export function InviteHotelAdminForm({ hotelId }: Props): React.ReactElement {
           type="email"
           required
           autoComplete="off"
-          defaultValue={state.emailEcho ?? ''}
           className="rounded border border-neutral-300 px-3 py-2"
         />
         {fieldErrorEmail ? <p className="text-xs text-red-700">{fieldErrorEmail}</p> : null}

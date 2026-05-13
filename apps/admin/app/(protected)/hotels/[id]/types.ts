@@ -40,8 +40,6 @@ export type InviteHotelAdminState = {
   fieldErrors?: InviteHotelAdminFieldErrors;
   /** Success message rendered as role="status" by the Client Component. */
   message?: string;
-  /** Echo-back of the submitted email so the form preserves user input. */
-  emailEcho?: string;
 };
 
 export type ResendPortalAccessLinkState = {
