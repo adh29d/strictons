@@ -8,9 +8,14 @@
     "start": "next start --port 3002",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "clean": "rm -rf .next .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.52.0",
+    "@strictons/db": "workspace:*",
+    "@strictons/email": "workspace:*",
     "@strictons/types": "workspace:*",
     "@strictons/ui": "workspace:*",
     "next": "^15.0.3",
@@ -18,6 +23,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@strictons/config-eslint": "workspace:*",
     "@strictons/config-tailwind": "workspace:*",
     "@strictons/config-tsconfig": "workspace:*",
@@ -27,6 +33,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.15.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

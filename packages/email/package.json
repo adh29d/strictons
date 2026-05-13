@@ -1,0 +1,28 @@
+{
+  "name": "@strictons/email",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./send": "./src/send.ts",
+    "./transports": "./src/transports/index.ts",
+    "./constants": "./src/constants.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf .turbo *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@strictons/config-eslint": "workspace:*",
+    "@strictons/config-tsconfig": "workspace:*",
+    "@types/node": "^22.9.0",
+    "eslint": "^9.15.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6"
+  }
+}

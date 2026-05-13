@@ -1,4 +1,4 @@
 {
   "extends": "@strictons/config-tsconfig/base.json",
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
 }

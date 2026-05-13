@@ -2,6 +2,19 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './database.types';
 
 /**
+ * Environment-variable convention.
+ *
+ * Env vars are read inside the factory function body, never at module
+ * top-level. Top-level reads run during Next.js build-time static analysis;
+ * when a var is unset (CI, preview environments before configuration,
+ * vendored builds) a top-level `process.env.X` evaluation can throw at
+ * import time or freeze the resulting value into the build artefact.
+ * Reading inside the function defers evaluation to first call, where a
+ * missing var fails loudly with an actionable error and the dead-code
+ * elimination boundary is unaffected.
+ */
+
+/**
  * Strictons service-role Supabase client.
  *
  * ┌─────────────────────────────────────────────────────────────────────┐

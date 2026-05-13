@@ -9,7 +9,7 @@
 
 begin;
 
-select plan(14);
+select plan(16);
 
 select _test_reset_role();
 
@@ -166,6 +166,40 @@ select is(
   current_setting('test.admin_a_bravo_update_count')::int,
   0,
   'admin_a UPDATE hotel B contact_email affects 0 rows (filtered by RLS)'
+);
+
+-- ---- Revoked hotel_user behaves like a non-member -------------------------
+-- Migration 14 introduces (revoked_at, revoked_by) and refines the
+-- membership-helper functions so revoked rows are excluded. From the
+-- revoked user's perspective, hotel_a is invisible — same shape as a
+-- never-was-a-member.
+
+select _test_reset_role();
+
+insert into _t values ('user_a_rev', _test_seed_user('user-revoked@example.test'));
+insert into public.hotel_users
+  (hotel_id, user_id, invited_email, accepted_at, revoked_at, revoked_by)
+  values (
+    (select v from _t where k='hotel_a'),
+    (select v from _t where k='user_a_rev'),
+    'user-revoked@example.test',
+    now(),
+    now(),
+    (select v from _t where k='admin_a')
+  );
+
+select _test_as_user((select v from _t where k='user_a_rev'));
+
+select is(
+  (select count(*)::int from public.hotels),
+  0,
+  'revoked hotel_user sees zero hotels (membership-helper excludes revoked rows)'
+);
+
+select is(
+  public.is_hotel_user((select v from _t where k='hotel_a')),
+  false,
+  'is_hotel_user returns false for revoked member'
 );
 
 select * from finish();
