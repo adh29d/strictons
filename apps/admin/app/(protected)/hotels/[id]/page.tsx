@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { createServiceRoleClient } from '@strictons/db/client';
 import type { HotelApprovalState } from '@strictons/types/hotels';
 import { HotelForm } from '../HotelForm';
+import { InviteHotelAdminForm } from './_components/invite-hotel-admin-form';
+import { HotelAdminsList } from './_components/hotel-admins-list';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +52,20 @@ export default async function EditHotelPage({
         submitLabel="Save changes"
         pendingLabel="Saving…"
       />
+
+      <section className="mt-10 border-t border-neutral-200 pt-8">
+        <h2 className="mb-3 text-lg font-semibold">Invite a hotel admin</h2>
+        <p className="mb-4 text-sm text-neutral-600">
+          Sends a magic-link invitation email. The invitee lands in the hotel partner portal after
+          clicking the link.
+        </p>
+        <InviteHotelAdminForm hotelId={hotel.id} />
+      </section>
+
+      <section className="mt-10 border-t border-neutral-200 pt-8">
+        <h2 className="mb-3 text-lg font-semibold">Hotel admins</h2>
+        <HotelAdminsList hotelId={hotel.id} />
+      </section>
     </main>
   );
 }

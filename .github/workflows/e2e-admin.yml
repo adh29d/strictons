@@ -1,0 +1,164 @@
+name: e2e / admin staff-side hotel-admin invitation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/admin/**'
+      - 'apps/partners/**'
+      - 'packages/db/**'
+      - 'packages/email/**'
+      - 'packages/types/**'
+      - '.github/workflows/e2e-admin.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/admin/**'
+      - 'apps/partners/**'
+      - 'packages/db/**'
+      - 'packages/email/**'
+      - 'packages/types/**'
+      - '.github/workflows/e2e-admin.yml'
+
+concurrency:
+  group: e2e-admin-${{ github.ref }}
+  cancel-in-progress: true
+
+# Cross-app E2E: this workflow boots BOTH admin and partners on the
+# same runner against a shared local Supabase. Admin's Playwright
+# webServer boots admin on :3001; partners runs as a background
+# process on :3002 started below. The cross-app navigation in
+# invite-hotel-admin.spec.ts reads E2E_PARTNERS_URL (set to
+# http://localhost:3002 below) to navigate from admin → partners
+# after extracting the magic-link from admin's memory inbox.
+#
+# Two separate workflows (this + e2e.yml) is the current shape;
+# Supabase-boot steps are duplicated. PROJECT_LOG flags the drift
+# risk for future consolidation; the consolidation is out of scope
+# for Phase 5.
+
+jobs:
+  playwright:
+    name: Playwright cross-app E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: apps/admin
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Boot local Supabase
+        working-directory: packages/db
+        run: pnpm exec supabase start
+
+      - name: Apply migrations to local Supabase
+        working-directory: packages/db
+        run: pnpm exec supabase db reset
+
+      # Mirror of e2e.yml's env-var export step. Supabase URL/keys +
+      # E2E_MODE=1 + EMAIL_TRANSPORT=memory + SENDGRID_API_KEY
+      # placeholder. Adds NEXT_PUBLIC_ADMIN_URL + E2E_PARTNERS_URL
+      # for the cross-app spec.
+      - name: Export Supabase + cross-app env vars
+        working-directory: packages/db
+        run: |
+          set -euo pipefail
+          ENV_OUT=$(pnpm exec supabase status -o env)
+          API_URL=$(echo "$ENV_OUT" | grep '^API_URL=' | cut -d= -f2- | tr -d '"')
+          ANON_KEY=$(echo "$ENV_OUT" | grep '^ANON_KEY=' | cut -d= -f2- | tr -d '"')
+          SERVICE_KEY=$(echo "$ENV_OUT" | grep '^SERVICE_ROLE_KEY=' | cut -d= -f2- | tr -d '"')
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_SECRET_KEY=$SERVICE_KEY"
+            echo "NEXT_PUBLIC_PARTNERS_URL=http://localhost:3002"
+            echo "NEXT_PUBLIC_ADMIN_URL=http://localhost:3001"
+            echo "E2E_PARTNERS_URL=http://localhost:3002"
+            echo "EMAIL_TRANSPORT=memory"
+            echo "E2E_MODE=1"
+            echo "SENDGRID_API_KEY=SG.placeholder-not-used-in-e2e"
+          } >> "$GITHUB_ENV"
+
+      - name: Build admin app
+        run: pnpm --filter @strictons/admin build
+
+      - name: Build partners app
+        run: pnpm --filter @strictons/partners build
+
+      # Start the partners app as a background process so the cross-
+      # app navigation in invite-hotel-admin.spec.ts can resolve
+      # http://localhost:3002/auth/confirm?... after the staff submit.
+      # Admin's Playwright webServer boots admin separately on :3001.
+      - name: Start partners app (background)
+        run: |
+          nohup pnpm --filter @strictons/partners start > /tmp/partners.log 2>&1 &
+          echo $! > /tmp/partners.pid
+
+      # Port-readiness sentinel. Structurally distinct from a test-
+      # body sleep: this is a process-boot wait identical in spirit
+      # to Playwright's own webServer.url polling. NOT a race-masking
+      # sleep — do not delete this thinking it's the Phase 4 gotcha.
+      # The bounded `for` loop fails the job if partners never comes
+      # up rather than hanging the runner.
+      - name: Wait for partners port-readiness
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3002/sign-in > /dev/null 2>&1; then
+              echo "partners ready on :3002 after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "partners did not become ready on :3002 within 60s"
+          echo "---- /tmp/partners.log ----"
+          cat /tmp/partners.log || true
+          exit 1
+
+      - name: Run admin Playwright tests
+        working-directory: apps/admin
+        run: pnpm test:e2e
+
+      - name: Tail partners log on failure
+        if: failure()
+        run: |
+          echo "---- /tmp/partners.log ----"
+          tail -200 /tmp/partners.log || true
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-playwright-report
+          path: apps/admin/playwright-report/
+          retention-days: 7
+
+      - name: Stop partners app
+        if: always()
+        run: |
+          if [ -f /tmp/partners.pid ]; then
+            kill "$(cat /tmp/partners.pid)" 2>/dev/null || true
+          fi
+
+      - name: Stop local Supabase
+        if: always()
+        working-directory: packages/db
+        run: pnpm exec supabase stop || true

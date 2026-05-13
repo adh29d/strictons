@@ -3,10 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { withServerActionInstrumentation } from '@sentry/nextjs';
-import { createServerClient } from '@strictons/db/server';
 import { createServiceRoleClient } from '@strictons/db/client';
 import { writeAuditLog } from '@strictons/db/audit';
-import { getMembershipSet } from '@strictons/db/roles';
+import { requireStaff } from '@/lib/require-staff';
 import type { Database } from '@strictons/db/types';
 import {
   HotelCreateInputSchema,
@@ -69,25 +68,12 @@ const _hotelApprovalStateExhaustivenessCheck: _MissingFromLiteralArray extends n
 void _hotelApprovalStateExhaustivenessCheck;
 
 // ----------------------------------------------------------------------------
-// Auth check
+// Auth check — see apps/admin/lib/require-staff.ts. Lifted in Phase 5
+// commit 4 because the new [id]/actions.ts (staff-initiated hotel-admin
+// invite + portal-access-link resend) needs to share it, and 'use
+// server' files may only export async functions so it could not stay
+// here as a local helper.
 // ----------------------------------------------------------------------------
-
-async function requireStaff(): Promise<
-  { kind: 'ok'; userId: string; email: string } | { kind: 'error'; error: string }
-> {
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { kind: 'error', error: 'Not signed in.' };
-  }
-  const memberships = await getMembershipSet(supabase, user.id);
-  if (!memberships.isStrictonsStaff) {
-    return { kind: 'error', error: 'You do not have Strictons staff access.' };
-  }
-  return { kind: 'ok', userId: user.id, email: memberships.email };
-}
 
 // ----------------------------------------------------------------------------
 // FormData parsing helpers
