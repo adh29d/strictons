@@ -14,8 +14,7 @@ import { decideAuth } from '@strictons/db/auth-helpers';
  *   (no hotel/business membership) can also sign in to the partners
  *   app without hitting /no-access.
  */
-const partnersAllowWhen = (m: MembershipSet): boolean =>
-  m.roles.length > 0 || m.isStrictonsStaff;
+const partnersAllowWhen = (m: MembershipSet): boolean => m.roles.length > 0 || m.isStrictonsStaff;
 
 /**
  * Partners-app middleware. Runs on every request matched by `config.matcher`

@@ -51,9 +51,7 @@ export async function signInWithMagicLink({
 
   const linkMatch = found.text.match(/https?:\/\/[^\s]+\/auth\/confirm\?[^\s]+/);
   if (!linkMatch) {
-    throw new Error(
-      `signInWithMagicLink: no /auth/confirm URL in plain-text body for ${email}`,
-    );
+    throw new Error(`signInWithMagicLink: no /auth/confirm URL in plain-text body for ${email}`);
   }
 
   await page.goto(linkMatch[0]);

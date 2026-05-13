@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MembershipSet } from './auth-types';
-import {
-  buildConfirmUrl,
-  decideAuth,
-  isSafeNextPath,
-  resolveAppUrl,
-} from './auth-helpers';
+import { buildConfirmUrl, decideAuth, isSafeNextPath, resolveAppUrl } from './auth-helpers';
 
 /**
  * Tests for the auth helpers lifted from apps/partners in Phase 4
@@ -57,8 +52,7 @@ const withBusiness: MembershipSet = {
 
 const staffOnly: MembershipSet = { ...empty, isStrictonsStaff: true };
 
-const partnersAllowWhen = (m: MembershipSet): boolean =>
-  m.roles.length > 0 || m.isStrictonsStaff;
+const partnersAllowWhen = (m: MembershipSet): boolean => m.roles.length > 0 || m.isStrictonsStaff;
 
 // ----------------------------------------------------------------------------
 // resolveAppUrl
@@ -104,12 +98,8 @@ describe('resolveAppUrl', () => {
   });
 
   it('throws when neither the explicit var nor VERCEL_URL is set', () => {
-    expect(() => resolveAppUrl('partners')).toThrow(
-      /NEXT_PUBLIC_PARTNERS_URL nor VERCEL_URL/,
-    );
-    expect(() => resolveAppUrl('admin')).toThrow(
-      /NEXT_PUBLIC_ADMIN_URL nor VERCEL_URL/,
-    );
+    expect(() => resolveAppUrl('partners')).toThrow(/NEXT_PUBLIC_PARTNERS_URL nor VERCEL_URL/);
+    expect(() => resolveAppUrl('admin')).toThrow(/NEXT_PUBLIC_ADMIN_URL nor VERCEL_URL/);
   });
 
   it('partners-side env var does not satisfy admin-side resolution', () => {

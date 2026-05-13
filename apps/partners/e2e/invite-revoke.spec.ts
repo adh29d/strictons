@@ -143,9 +143,7 @@ test.describe('partners invite + revoke', () => {
     // Admin reload: invitee row now shows accepted state
     // ----------------------------------------------------------------------
     await admin.reload();
-    const inviteeRowAccepted = admin
-      .getByRole('listitem')
-      .filter({ hasText: inviteeEmail });
+    const inviteeRowAccepted = admin.getByRole('listitem').filter({ hasText: inviteeEmail });
     await expect(inviteeRowAccepted.getByText(/accepted/i)).toBeVisible();
 
     // ----------------------------------------------------------------------
@@ -156,18 +154,14 @@ test.describe('partners invite + revoke', () => {
     admin.once('dialog', (dialog) => {
       void dialog.accept();
     });
-    await inviteeRowAccepted
-      .getByRole('button', { name: HOTEL_ADMIN_BUTTON_LABEL })
-      .click();
+    await inviteeRowAccepted.getByRole('button', { name: HOTEL_ADMIN_BUTTON_LABEL }).click();
 
     // After revoke, the row should render in revoked state. The page
     // re-renders via Server Action + Next's revalidation, but the
     // RevokeButton uses useActionState without a revalidate(), so a
     // reload is the simplest way to read fresh server state.
     await admin.reload();
-    const inviteeRowRevoked = admin
-      .getByRole('listitem')
-      .filter({ hasText: inviteeEmail });
+    const inviteeRowRevoked = admin.getByRole('listitem').filter({ hasText: inviteeEmail });
     await expect(inviteeRowRevoked.getByText(/Revoked on/i)).toBeVisible();
 
     // ----------------------------------------------------------------------

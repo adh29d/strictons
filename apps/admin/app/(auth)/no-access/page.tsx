@@ -44,16 +44,13 @@ export default async function NoAccessPage(): Promise<React.ReactElement> {
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-2 text-2xl font-semibold">No access</h1>
       <p className="mb-4 text-sm text-neutral-700">
-        Signed in as <strong>{email}</strong>, but this account isn&apos;t recognised as
-        Strictons staff.
+        Signed in as <strong>{email}</strong>, but this account isn&apos;t recognised as Strictons
+        staff.
       </p>
       <p className="mb-4 text-sm text-neutral-700">
-        If you believe this is an error, contact another Strictons admin. If you meant to
-        sign in to the hotel or business partner portal, you want{' '}
-        <a
-          href="https://partners.strictons.com"
-          className="underline"
-        >
+        If you believe this is an error, contact another Strictons admin. If you meant to sign in to
+        the hotel or business partner portal, you want{' '}
+        <a href="https://partners.strictons.com" className="underline">
           partners.strictons.com
         </a>{' '}
         instead.

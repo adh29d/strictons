@@ -63,8 +63,7 @@ export type AppKind = 'partners' | 'admin';
  * static analysis can't freeze a stale value into the bundle.
  */
 export function resolveAppUrl(appKind: AppKind): string {
-  const envVarName =
-    appKind === 'partners' ? 'NEXT_PUBLIC_PARTNERS_URL' : 'NEXT_PUBLIC_ADMIN_URL';
+  const envVarName = appKind === 'partners' ? 'NEXT_PUBLIC_PARTNERS_URL' : 'NEXT_PUBLIC_ADMIN_URL';
   const explicit = process.env[envVarName];
   if (explicit) return stripTrailingSlash(explicit);
 

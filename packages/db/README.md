@@ -183,7 +183,6 @@ The runbook targets `strictons-dev`. For `strictons-prod` once that exists, the 
    Usually unnecessary for a row INSERT (vs a column or policy change), but the cost is zero and the symptom this prevents — first-sign-in `isStrictonsStaff: false` until the next reload — is hard to diagnose.
 
 6. **Verify the staff user can sign in.** Navigate to the admin app preview URL (or `admin.strictons.com` for production). Enter the staff member's email. Receive the magic link. Click it. Expected behaviour:
-
    - `/auth/confirm` accepts the token and establishes the session
    - Middleware reads `isStrictonsStaff: true` (commit 5's real query) and lets the request through
    - The landing page at `/` renders with the staff member's email in the "Signed in as …" line
@@ -255,7 +254,6 @@ Phase 5+ deactivation UX is uniformly **soft-delete (a flag) or `banned_until`**
 Two SQL statements; no Dashboard delete.
 
 1. **Ban the test auth user.** Supabase's `auth.users` table has a `banned_until` column; setting a far-future value invalidates the user without requiring a DELETE. Two paths:
-
    - **Supabase Dashboard** (preferred when available): Authentication → Users → row action menu → "Ban user". If the Dashboard build doesn't surface this action, use the SQL fallback below.
    - **SQL Editor** (fallback):
 

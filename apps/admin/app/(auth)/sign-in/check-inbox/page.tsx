@@ -23,8 +23,7 @@ export default async function CheckInboxPage({
       <p className="mb-4 text-sm text-neutral-700">
         {email ? (
           <>
-            We sent a Strictons admin sign-in link to <strong>{email}</strong>. Click it to
-            sign in.
+            We sent a Strictons admin sign-in link to <strong>{email}</strong>. Click it to sign in.
           </>
         ) : (
           <>We sent you a Strictons admin sign-in link. Click it to sign in.</>

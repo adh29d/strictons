@@ -64,8 +64,7 @@ export default async function AdminLandingPage(): Promise<React.ReactElement> {
       <section className="rounded border border-neutral-200 p-6">
         <h2 className="mb-2 text-lg font-medium">Hotels</h2>
         <p className="mb-4 text-sm text-neutral-700">
-          Manage hotels: list, add, edit, and update approval state and custom-domain
-          attachments.
+          Manage hotels: list, add, edit, and update approval state and custom-domain attachments.
         </p>
         <Link
           href="/hotels"

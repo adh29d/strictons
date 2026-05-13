@@ -91,8 +91,7 @@ export async function signInWithEmail(
       // properties.hashed_token + verifyOtp({ type: 'email', token_hash })
       // is the response shape Phase 3 C1-verified against GoTrue. The
       // /auth/confirm Route Handler lands in commit 6.
-      const tokenHash = (data?.properties as { hashed_token?: string } | undefined)
-        ?.hashed_token;
+      const tokenHash = (data?.properties as { hashed_token?: string } | undefined)?.hashed_token;
       if (!tokenHash) {
         throw new Error(
           'admin.generateLink response missing properties.hashed_token; Supabase response shape changed unexpectedly',
