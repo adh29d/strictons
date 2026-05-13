@@ -1,4 +1,4 @@
-import { isSafeNextPath } from '@/lib/auth-link';
+import { isSafeNextPath } from '@strictons/db/auth-helpers';
 import { SignInForm } from './SignInForm';
 
 type SearchParams = Promise<{

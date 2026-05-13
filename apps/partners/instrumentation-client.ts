@@ -12,6 +12,10 @@
  * correct shape. Server and edge init files read the same variable
  * for consistency.
  *
+ * initialScope: { tags: { app: 'partners' } } tags every event with
+ * the originating app, so the shared Sentry project can filter cleanly
+ * between partners and admin without running separate projects.
+ *
  * Init only runs when DSN is set; otherwise silent no-op so local dev
  * without a Sentry project configured doesn't error out.
  */
@@ -33,6 +37,8 @@ if (dsn) {
 
     // Don't auto-instrument every fetch — minimal noise this phase.
     integrations: [],
+
+    initialScope: { tags: { app: 'partners' } },
   });
 }
 

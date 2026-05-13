@@ -144,6 +144,158 @@ The prod-deploy workflow is inert until provisioning is complete.
 5. **Dispatch a dry-run** of `db-deploy-prod.yml` with confirm string `"deploy to prod"` to verify the diff job runs cleanly. The push job will pause for approval; you can cancel without applying.
 6. **Apply the baseline** by dispatching the workflow again, this time letting the push job proceed through approval. After this, every subsequent dispatch applies only new migrations.
 
+## Provisioning a Strictons staff user (run once per new staff member)
+
+Strictons staff are members of `public.strictons_staff`. The table's write side is service-role only (Phase 2 locked decision; no `FOR ALL to authenticated using is_strictons_staff()` write policy exists), so a new staff user is created out-of-band via this runbook rather than from inside any app.
+
+Phase 4 commit 7 introduces this runbook. The **first** execution provisions Steven's own real staff user and, as its final step, removes the Phase 3 test data (`dev-test@strictons.com`, "Test Beachcomber Hotel", and the membership rows linking them). That cleanup runs once, during the first staff provisioning, to prove the runbook works before any future staff provisioning relies on it.
+
+The runbook targets `strictons-dev`. For `strictons-prod` once that exists, the steps are identical — just point at the prod project's Supabase Dashboard.
+
+### Steps
+
+1. **Open the target Supabase project** in the Dashboard (https://supabase.com/dashboard). For Phase 4, this is `strictons-dev`.
+
+2. **Create the auth.users row via the Dashboard.** Authentication → Users → Add user → Send invitation. Enter the staff member's email. Check **Auto Confirm User** so they don't need to click a Supabase-templated confirmation email — we ship our own magic links from `welcome@strictons.com` via SendGrid, so the Supabase default email is disabled.
+
+   Do NOT INSERT into `auth.users` via SQL. The auth schema is managed by GoTrue and direct INSERTs skip the password / metadata defaults GoTrue expects. The Dashboard's "Add user" flow is the supported path.
+
+   Important — Phase 2 ordering gotcha: when an auth.users row is created (via Dashboard, API, or the supported admin endpoints), the `on_auth_user_created` trigger (`SECURITY DEFINER`) AUTO-POPULATES the corresponding `public.users` row. **Never INSERT into `public.users` manually after this step.** Doing so would double-insert and either error on the primary key conflict or, worse, race the trigger.
+
+3. **Copy the new user's `id`** from the Dashboard's Users list (it's a UUID).
+
+4. **Insert into `public.strictons_staff`** via SQL Editor:
+
+   ```sql
+   insert into public.strictons_staff (user_id)
+   values ('<paste-user-id-here>')
+   on conflict (user_id) do nothing;
+   ```
+
+   `on conflict do nothing` makes the statement idempotent — re-running with the same id is a no-op rather than an error. Strictons-side writes to this table always run via the service-role / SQL Editor path, never from inside any app, so RLS does not gate this INSERT.
+
+5. **(Optional) Notify PostgREST of the schema reload** in case the staff status is not visible to the new user's first sign-in:
+
+   ```sql
+   notify pgrst, 'reload schema';
+   ```
+
+   Usually unnecessary for a row INSERT (vs a column or policy change), but the cost is zero and the symptom this prevents — first-sign-in `isStrictonsStaff: false` until the next reload — is hard to diagnose.
+
+6. **Verify the staff user can sign in.** Navigate to the admin app preview URL (or `admin.strictons.com` for production). Enter the staff member's email. Receive the magic link. Click it. Expected behaviour:
+   - `/auth/confirm` accepts the token and establishes the session
+   - Middleware reads `isStrictonsStaff: true` (commit 5's real query) and lets the request through
+   - The landing page at `/` renders with the staff member's email in the "Signed in as …" line
+   - The page is NOT `/no-access`
+
+   If the user lands on `/no-access`, the insertion into `public.strictons_staff` didn't apply or PostgREST hasn't reloaded the schema yet. Re-run step 5, then sign out and back in.
+
+7. **Confirm sign-out works.** Click "Sign out" on the landing. Expected: redirected to `/sign-in`. Visiting `/` after sign-out redirects back to `/sign-in?next=%2F`.
+
+### Final step (FIRST RUN ONLY) — remove the Phase 3 test data
+
+This step runs only during the first staff user's provisioning, to prove the runbook works end-to-end before any future staff user depends on it. Subsequent runs skip this entire section.
+
+`dev-test@strictons.com` and "Test Beachcomber Hotel" were inserted via SQL Editor during Phase 3 commit-15 verification. Phase 3's PROJECT_LOG explicitly deferred their cleanup to this runbook.
+
+#### Why the test hotel row is NOT deleted
+
+Phase 2's locked decision makes `public.audit_log` append-only via a trigger blocking UPDATE and DELETE for every role (including service_role). The FK from `audit_log.entity_hotel_id` → `hotels.id` is `ON DELETE SET NULL`, which requires Postgres to UPDATE the audit rows whenever the referenced hotel is deleted. The trigger blocks that UPDATE, and the entire `DELETE FROM public.hotels` transaction rolls back with:
+
+```
+ERROR: audit_log is append-only; UPDATE not permitted
+SQL statement "UPDATE ONLY "public"."audit_log" SET "entity_hotel_id" = NULL WHERE $1 OPERATOR(pg_catalog.=) "entity_hotel_id""
+```
+
+This is correct behaviour — the audit trail is meant to outlast the entities it references. The runbook adapts: the test hotel row stays in place. After this cleanup, "Test Beachcomber Hotel" is an orphan record — no `hotel_users` link it to anyone, no business records reference it, and no future audit rows can be written against it because no app surface mentions it. Future audit queries that need to filter to "real hotels" can exclude test rows by slug prefix (e.g. `where slug not like 'test-%'`).
+
+#### Why the test user row is NOT deleted
+
+The same trigger + FK pattern blocks the user delete by a longer path. Cascade trace:
+
+1. `auth.users` delete →
+2. `public.users` delete (via `users_id_fkey` ON DELETE CASCADE) →
+3. `public.audit_log` UPDATE (via `audit_log_actor_user_id_fkey` ON DELETE SET NULL) →
+4. blocked by `enforce_audit_log_append_only()` trigger →
+5. transaction rolls back.
+
+The Dashboard surfaces this as a generic `"Database error deleting user"`. The diagnostic query is:
+
+```sql
+-- All FKs into public.users.id, with their ON DELETE action.
+select tc.constraint_name, tc.table_name, rc.delete_rule
+from information_schema.referential_constraints rc
+join information_schema.table_constraints tc
+  on tc.constraint_name = rc.constraint_name
+where rc.unique_constraint_name in (
+  select constraint_name from information_schema.table_constraints
+  where table_schema = 'public' and table_name = 'users'
+    and constraint_type = 'PRIMARY KEY'
+);
+```
+
+The result: **eleven of the twelve FKs from public tables into `public.users.id` are `ON DELETE SET NULL`** (only `strictons_staff.user_id` is `CASCADE`). Any user who has performed an audit-logged action — which includes every user who has signed in, since `/auth/confirm` writes `sign_in_succeeded` — has audit history and is effectively undeletable. `dev-test@strictons.com` has signed in, so it cannot be deleted.
+
+The mechanism for users mirrors the mechanism for entities: deactivate, don't delete.
+
+#### Broader implication
+
+This constraint applies to **any** audit-linked row, not just hotels:
+
+- `hotels` (`audit_log.entity_hotel_id`)
+- `businesses` (`audit_log.entity_business_id`)
+- `users` (`audit_log.actor_user_id`)
+- `candidate_businesses` (when an audit entry has referenced them — same SET NULL pattern)
+
+Phase 5+ deactivation UX is uniformly **soft-delete (a flag) or `banned_until`** for every audited row type, never a hard DELETE. The audit log's reach is wider than just entity tables — it extends through every FK pointing at any audited row, including users in `public.users`.
+
+#### Steps
+
+Two SQL statements; no Dashboard delete.
+
+1. **Ban the test auth user.** Supabase's `auth.users` table has a `banned_until` column; setting a far-future value invalidates the user without requiring a DELETE. Two paths:
+   - **Supabase Dashboard** (preferred when available): Authentication → Users → row action menu → "Ban user". If the Dashboard build doesn't surface this action, use the SQL fallback below.
+   - **SQL Editor** (fallback):
+
+     ```sql
+     update auth.users
+     set banned_until = '2099-12-31 23:59:59+00'
+     where email = 'dev-test@strictons.com';
+     ```
+
+   `banned_until` in the far future is the documented Supabase "permanent ban" idiom. `auth.users` UPDATE has no FK cascade into `audit_log` — only DELETE on `public.users` triggers the SET NULL path — so this statement succeeds cleanly.
+
+2. **Remove the test user's hotel memberships.** Deleting from `public.hotel_users` does NOT cascade through `audit_log` (`audit_log.entity_id` is a generic uuid with no FK enforcement; `audit_log` has no direct FK pointing at `hotel_users.id`). The DELETE succeeds:
+
+   ```sql
+   delete from public.hotel_users
+   where invited_email = 'dev-test@strictons.com';
+   ```
+
+   This removes both the original Phase 3 invite (`user_id IS NULL`) and the accepted row that resulted from the first magic-link sign-in (`user_id` set to dev-test's auth id).
+
+   No DELETE on `public.hotels` or `public.users` — see the two "Why the … row is NOT deleted" sections above.
+
+#### Verify
+
+- **Sign-in fails.** Submit `dev-test@strictons.com` on the partners or admin sign-in form. The magic-link request submits successfully (anti-enumeration — Phase 3 locked decision), but the link itself cannot complete sign-in. **Verify whether Supabase Auth's `verifyOtp` rejects the banned user cleanly:**
+  - Expected: the `/auth/confirm` handler receives an error from `verifyOtp` and redirects to `/sign-in?error=expired`.
+  - **[FOLLOWUP]** If `verifyOtp` does NOT reject a banned user and a session is established, flag for separate investigation. The defence-in-depth at that point is the `/no-access` redirect (dev-test has no staff row and post-cleanup has no hotel memberships either, so the partners predicate routes to `/no-access` regardless). But a banned-user verifyOtp bypass would be a real Supabase Auth bug worth raising upstream.
+- `select banned_until from auth.users where email = 'dev-test@strictons.com'` returns the far-future timestamp.
+- `select count(*) from public.hotel_users where invited_email = 'dev-test@strictons.com'` returns 0.
+- `select id, slug, name from public.hotels where slug = 'test-beachcomber'` still returns the row — that's intentional. Confirm there are no `hotel_users` references: `select count(*) from public.hotel_users where hotel_id = (select id from public.hotels where slug = 'test-beachcomber')` returns 0.
+- `select email from public.users where email = 'dev-test@strictons.com'` still returns the row — also intentional. The user is banned at the auth layer but the `public.users` row remains because every audit-history reference to its `id` would otherwise break.
+
+#### End-state summary
+
+After this cleanup, the strictons-dev project contains:
+
+- **Test hotel**: present in `public.hotels`, orphaned (no `hotel_users` references, no businesses, no app surface mentions it).
+- **Test user**: present in `auth.users` with `banned_until` set far-future; present in `public.users` with audit history intact; cannot complete sign-in.
+- **Test memberships**: gone (the explicit DELETE in step 2 removed them, since `hotel_users` deletes don't cascade through audit_log).
+
+Once verified, this section of the runbook is done forever. Subsequent staff provisioning skips it.
+
 ## Phase 2 status
 
 Done. Schema covers every cluster called out in the brief plus the locked decisions (custom_domain on hotels, guides as analytics scope, audit_log denormalised columns, append-only triggers, premium-position uniqueness, print-state immutability, geo_confirmed reserved enum value, etc.). 10 pgTAP suites cover unauth, staff, hotel/business isolation, audit append-only, quality-clause, cross-tenant writes, service-role reads, print-state immutability, and premium-position uniqueness.

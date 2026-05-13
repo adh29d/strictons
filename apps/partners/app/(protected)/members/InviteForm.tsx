@@ -38,7 +38,7 @@ export function InviteForm({ scope, scopeId }: Props): React.ReactElement {
       ) : null}
       {state.ok ? (
         <p role="status" className="text-sm text-green-700">
-          Invite created. Reload the page to see the new row.
+          Invite created.
         </p>
       ) : null}
       <button

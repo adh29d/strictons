@@ -20,14 +20,33 @@ import { createMemoryTransport } from './transports/memory';
  * Resolve the active email transport from the environment.
  *
  * Selection rule (read at first call):
+ *
  *   EMAIL_TRANSPORT=sendgrid → real SendGrid send
  *   EMAIL_TRANSPORT=memory   → in-process buffer (E2E_MODE only)
- *   EMAIL_TRANSPORT=console  → console.log
- *   unset                    → console (safe default for local dev)
+ *   EMAIL_TRANSPORT=console  → console.log only (no email sent)
+ *   unset                    → console.log only (no email sent)
+ *   any other value          → throws
  *
- * `memory` additionally requires `E2E_MODE=1` so a misconfigured preview
- * deploy can never silently swallow real magic-link emails into a
- * process-local queue.
+ * Default-when-unset is `console`, not `sendgrid`. There is no
+ * auto-detect by NODE_ENV / VERCEL_ENV / hostname — any deployment
+ * that must send real email needs to set EMAIL_TRANSPORT=sendgrid
+ * explicitly, including production. This is a deliberate safe-by-
+ * default posture (a misconfigured preview cannot silently send
+ * real email at developers and end users), but it means a freshly-
+ * configured Vercel project that omits EMAIL_TRANSPORT will silently
+ * console-log every magic-link request and the recipient will never
+ * receive an email. Phase 4 commit 4 verification paid one diagnostic
+ * cycle on this.
+ *
+ * `memory` additionally requires `E2E_MODE=1` so a misconfigured
+ * preview deploy can never silently swallow real magic-link emails
+ * into a process-local queue.
+ *
+ * Operational convention (Phase 4 onwards): EMAIL_TRANSPORT is a
+ * cross-app value and lives in Vercel's TEAM-SHARED env vars, so
+ * every app project inherits the same transport choice. Per-project
+ * overrides are still possible if a single app needs a different
+ * transport for testing.
  */
 export function resolveTransport(): EmailTransport {
   const choice = process.env.EMAIL_TRANSPORT?.toLowerCase().trim() ?? '';

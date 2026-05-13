@@ -6,7 +6,8 @@
   "exports": {
     "./placeholder": "./src/placeholder.ts",
     "./invites": "./src/invites.ts",
-    "./auth": "./src/auth.ts"
+    "./auth": "./src/auth.ts",
+    "./hotels": "./src/hotels.ts"
   },
   "scripts": {
     "lint": "eslint .",

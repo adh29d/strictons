@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const createServerClientMock = vi.fn();
 const getMembershipSetMock = vi.fn();
 const writeAuditLogMock = vi.fn();
+const revalidatePathMock = vi.fn();
 
 vi.mock('@strictons/db/server', () => ({
   createServerClient: () => createServerClientMock(),
@@ -12,8 +13,17 @@ vi.mock('@strictons/db/server', () => ({
 vi.mock('@strictons/db/roles', () => ({
   getMembershipSet: (...args: unknown[]) => getMembershipSetMock(...args),
 }));
-vi.mock('@/lib/audit', () => ({
+vi.mock('@strictons/db/audit', () => ({
   writeAuditLog: (...args: unknown[]) => writeAuditLogMock(...args),
+}));
+// next/cache requires a Next request context (static generation store).
+// Vitest doesn't run inside that context, so calling revalidatePath
+// from a Server Action under test throws "Invariant: static generation
+// store missing". Mock it for the unit tests; the real revalidation
+// behaviour is exercised by the Playwright E2E in
+// apps/partners/e2e/invite-revoke.spec.ts.
+vi.mock('next/cache', () => ({
+  revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
 }));
 
 // ---- Test helpers ---------------------------------------------------------
