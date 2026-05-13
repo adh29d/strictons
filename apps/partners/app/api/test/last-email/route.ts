@@ -25,7 +25,12 @@ import { findMemoryInboxEntry } from '@strictons/email/transports';
  * no transport state and no audit identifiers.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  console.log(
+    `[diag][last-email] GET url=${request.url} E2E_MODE=${JSON.stringify(process.env.E2E_MODE)}`,
+  );
+
   if (process.env.E2E_MODE !== '1') {
+    console.log('[diag][last-email] 404 gate (E2E_MODE!=1)');
     return new NextResponse('Not Found', { status: 404 });
   }
 
@@ -37,8 +42,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const entry = findMemoryInboxEntry(to);
   if (!entry) {
+    console.log(`[diag][last-email] no entry for to=${to}`);
     return NextResponse.json({ entry: null }, { status: 404 });
   }
+  console.log(`[diag][last-email] HIT for to=${to}`);
 
   return NextResponse.json({
     entry: {

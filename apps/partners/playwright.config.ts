@@ -44,6 +44,11 @@ export default defineConfig({
     url: 'http://localhost:3002/sign-in',
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
+    // DIAGNOSTIC (commit 14 failure investigation): surface webServer
+    // stdout/stderr to the CI log so the [diag][...] traces from the
+    // Server Action, route handler, and memory transport are visible.
+    stdout: 'pipe',
+    stderr: 'pipe',
     env: {
       // Email transport configuration: in-memory inbox the test reads
       // via /api/test/last-email. The route handler 404s unless

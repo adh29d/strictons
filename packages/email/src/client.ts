@@ -31,8 +31,17 @@ import { createMemoryTransport } from './transports/memory';
  */
 export function resolveTransport(): EmailTransport {
   const choice = process.env.EMAIL_TRANSPORT?.toLowerCase().trim() ?? '';
+  // DIAGNOSTIC (commit 14): gated on E2E_MODE=1 so vitest stays quiet.
+  const diag = process.env.E2E_MODE === '1';
+  if (diag)
+    console.log(
+      `[diag][client] resolveTransport raw=${JSON.stringify(process.env.EMAIL_TRANSPORT)} choice=${choice} e2e=${JSON.stringify(process.env.E2E_MODE)}`,
+    );
 
-  if (choice === 'sendgrid') return createSendgridTransport();
+  if (choice === 'sendgrid') {
+    if (diag) console.log('[diag][client] selected=sendgrid');
+    return createSendgridTransport();
+  }
 
   if (choice === 'memory') {
     if (process.env.E2E_MODE !== '1') {
@@ -40,10 +49,14 @@ export function resolveTransport(): EmailTransport {
         'resolveTransport: EMAIL_TRANSPORT=memory requires E2E_MODE=1; refusing to swallow emails silently in a non-E2E environment',
       );
     }
+    if (diag) console.log('[diag][client] selected=memory');
     return createMemoryTransport();
   }
 
-  if (choice === 'console' || choice === '') return createConsoleTransport();
+  if (choice === 'console' || choice === '') {
+    if (diag) console.log('[diag][client] selected=console');
+    return createConsoleTransport();
+  }
 
   throw new Error(
     `resolveTransport: unknown EMAIL_TRANSPORT=${choice}; expected one of sendgrid|memory|console`,
