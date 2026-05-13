@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { withServerActionInstrumentation } from '@sentry/nextjs';
 import { createServiceRoleClient } from '@strictons/db/client';
 import { sendMagicLink, EmailSendError } from '@strictons/email/send';
 import { MAGIC_LINK_EXPIRY_MINUTES } from '@strictons/email/constants';
@@ -26,6 +27,18 @@ import type { SignInState } from './types';
  * allowed — Next's runtime checker throws "A 'use server' file can only
  * export async functions, found object" on module load otherwise.
  * Move types to ./types.ts and constants to a non-'use server' sibling.
+ *
+ * Sentry instrumentation: the body is wrapped in
+ * withServerActionInstrumentation, which (a) flushes events via
+ * vercelWaitUntil before the serverless function freezes — without
+ * this, Sentry events emitted by audit-logging catch blocks are
+ * silently dropped — and (b) captures any unhandled throw with the
+ * original error preserved, bypassing Next.js's production-mode error
+ * sanitisation that otherwise replaces the message with "An error
+ * occurred in the Server Components render…". `formData` is
+ * deliberately NOT passed to the wrapper: it would attach every form
+ * field (including `email`) as a Sentry event extra regardless of
+ * sendDefaultPii=false. The transaction name alone is enough.
  */
 
 const INITIAL_STATE: SignInState = {};
@@ -34,6 +47,7 @@ export async function signInWithEmail(
   _prev: SignInState,
   formData: FormData,
 ): Promise<SignInState> {
+  return withServerActionInstrumentation('signInWithEmail', async (): Promise<SignInState> => {
   const rawEmail = (formData.get('email') ?? '').toString();
   const rawNextValue = (formData.get('next') ?? '').toString().trim();
   const rawNext = rawNextValue.length > 0 ? rawNextValue : undefined;
@@ -137,4 +151,5 @@ export async function signInWithEmail(
     redirect(`/sign-in/check-inbox?email=${encodeURIComponent(email)}`);
   }
   return INITIAL_STATE;
+  });
 }

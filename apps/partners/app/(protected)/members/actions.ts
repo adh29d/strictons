@@ -1,5 +1,6 @@
 'use server';
 
+import { withServerActionInstrumentation } from '@sentry/nextjs';
 import { createServerClient } from '@strictons/db/server';
 import { getMembershipSet } from '@strictons/db/roles';
 import {
@@ -21,6 +22,15 @@ import type { ActionState } from './types';
  * allowed — Next's runtime checker throws "A 'use server' file can only
  * export async functions, found object" on module load otherwise.
  * Move types to ./types.ts and constants to a non-'use server' sibling.
+ *
+ * Sentry instrumentation: every exported action wraps its body in
+ * withServerActionInstrumentation. The wrapper flushes pending Sentry
+ * events via vercelWaitUntil before the serverless function freezes,
+ * AND captures unhandled throws with the original error preserved
+ * before Next.js's production-mode sanitisation replaces the message
+ * with a generic placeholder. `formData` is deliberately NOT passed
+ * — it would attach every form field (including invitee emails) as a
+ * Sentry event extra regardless of sendDefaultPii=false.
  */
 
 // ----------------------------------------------------------------------------
@@ -80,6 +90,7 @@ export async function inviteHotelMember(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  return withServerActionInstrumentation('inviteHotelMember', async (): Promise<ActionState> => {
   const parsed = InviteHotelMemberInputSchema.safeParse({
     email: (formData.get('email') ?? '').toString(),
     hotelId: (formData.get('hotelId') ?? '').toString(),
@@ -130,12 +141,14 @@ export async function inviteHotelMember(
   });
 
   return { ok: true };
+  });
 }
 
 export async function inviteBusinessMember(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  return withServerActionInstrumentation('inviteBusinessMember', async (): Promise<ActionState> => {
   const parsed = InviteBusinessMemberInputSchema.safeParse({
     email: (formData.get('email') ?? '').toString(),
     businessId: (formData.get('businessId') ?? '').toString(),
@@ -182,6 +195,7 @@ export async function inviteBusinessMember(
   });
 
   return { ok: true };
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -189,6 +203,7 @@ export async function inviteBusinessMember(
 // ----------------------------------------------------------------------------
 
 export async function revokeMember(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return withServerActionInstrumentation('revokeMember', async (): Promise<ActionState> => {
   const parsed = RevokeMemberInputSchema.safeParse({
     membershipId: (formData.get('membershipId') ?? '').toString(),
     scope: (formData.get('scope') ?? '').toString(),
@@ -291,4 +306,5 @@ export async function revokeMember(_prev: ActionState, formData: FormData): Prom
   });
 
   return { ok: true };
+  });
 }

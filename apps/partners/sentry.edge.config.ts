@@ -8,6 +8,10 @@
  * Reads `NEXT_PUBLIC_SENTRY_DSN` for consistency with the browser
  * and server init — one env var name across all runtimes. The DSN
  * is public by design.
+ *
+ * initialScope: { tags: { app: 'partners' } } tags every event with
+ * the originating app, so the shared Sentry project can filter cleanly
+ * between partners and admin without running separate projects.
  */
 import * as Sentry from '@sentry/nextjs';
 
@@ -19,5 +23,6 @@ if (dsn) {
     tracesSampleRate: 0,
     sendDefaultPii: false,
     integrations: [],
+    initialScope: { tags: { app: 'partners' } },
   });
 }
