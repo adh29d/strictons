@@ -210,35 +210,91 @@ SQL statement "UPDATE ONLY "public"."audit_log" SET "entity_hotel_id" = NULL WHE
 
 This is correct behaviour — the audit trail is meant to outlast the entities it references. The runbook adapts: the test hotel row stays in place. After this cleanup, "Test Beachcomber Hotel" is an orphan record — no `hotel_users` link it to anyone, no business records reference it, and no future audit rows can be written against it because no app surface mentions it. Future audit queries that need to filter to "real hotels" can exclude test rows by slug prefix (e.g. `where slug not like 'test-%'`).
 
-This constraint applies to any `audit_log`-linked entity: deletes of hotels, businesses, candidate_businesses, etc. will fail with the same trigger error once any audit row has referenced them. The Phase 5+ hotel-delete UX is consequently soft-delete (a flag), never a hard DELETE.
+#### Why the test user row is NOT deleted
+
+The same trigger + FK pattern blocks the user delete by a longer path. Cascade trace:
+
+1. `auth.users` delete →
+2. `public.users` delete (via `users_id_fkey` ON DELETE CASCADE) →
+3. `public.audit_log` UPDATE (via `audit_log_actor_user_id_fkey` ON DELETE SET NULL) →
+4. blocked by `enforce_audit_log_append_only()` trigger →
+5. transaction rolls back.
+
+The Dashboard surfaces this as a generic `"Database error deleting user"`. The diagnostic query is:
+
+```sql
+-- All FKs into public.users.id, with their ON DELETE action.
+select tc.constraint_name, tc.table_name, rc.delete_rule
+from information_schema.referential_constraints rc
+join information_schema.table_constraints tc
+  on tc.constraint_name = rc.constraint_name
+where rc.unique_constraint_name in (
+  select constraint_name from information_schema.table_constraints
+  where table_schema = 'public' and table_name = 'users'
+    and constraint_type = 'PRIMARY KEY'
+);
+```
+
+The result: **eleven of the twelve FKs from public tables into `public.users.id` are `ON DELETE SET NULL`** (only `strictons_staff.user_id` is `CASCADE`). Any user who has performed an audit-logged action — which includes every user who has signed in, since `/auth/confirm` writes `sign_in_succeeded` — has audit history and is effectively undeletable. `dev-test@strictons.com` has signed in, so it cannot be deleted.
+
+The mechanism for users mirrors the mechanism for entities: deactivate, don't delete.
+
+#### Broader implication
+
+This constraint applies to **any** audit-linked row, not just hotels:
+
+- `hotels` (`audit_log.entity_hotel_id`)
+- `businesses` (`audit_log.entity_business_id`)
+- `users` (`audit_log.actor_user_id`)
+- `candidate_businesses` (when an audit entry has referenced them — same SET NULL pattern)
+
+Phase 5+ deactivation UX is uniformly **soft-delete (a flag) or `banned_until`** for every audited row type, never a hard DELETE. The audit log's reach is wider than just entity tables — it extends through every FK pointing at any audited row, including users in `public.users`.
 
 #### Steps
 
-Single Dashboard action, then verify.
+Two SQL statements; no Dashboard delete.
 
-1. **Delete the test auth user via the Dashboard.** Authentication → Users → search `dev-test@strictons.com` → ⋯ → Delete user. This cascades through the user_id FKs:
-   - `public.users` row removed (via `on_auth_user_deleted` or the FK cascade)
-   - `public.hotel_users` rows where `user_id` points at the test user are removed automatically
-   - `auth.users` row removed
+1. **Ban the test auth user.** Supabase's `auth.users` table has a `banned_until` column; setting a far-future value invalidates the user without requiring a DELETE. Two paths:
 
-   The `hotel_users` row with `invited_email = 'dev-test@strictons.com'` but a NULL `user_id` (Phase 3 invite that was never accepted) is unaffected by the cascade; if any such row exists, it's an orphan invite that can be removed with the SQL DELETE below, but is also harmless to leave (no policy permits an unauth user to do anything with it).
+   - **Supabase Dashboard** (preferred when available): Authentication → Users → row action menu → "Ban user". If the Dashboard build doesn't surface this action, use the SQL fallback below.
+   - **SQL Editor** (fallback):
 
-2. **Optional** — drop any never-accepted invite for `dev-test@strictons.com` left behind:
+     ```sql
+     update auth.users
+     set banned_until = '2099-12-31 23:59:59+00'
+     where email = 'dev-test@strictons.com';
+     ```
+
+   `banned_until` in the far future is the documented Supabase "permanent ban" idiom. `auth.users` UPDATE has no FK cascade into `audit_log` — only DELETE on `public.users` triggers the SET NULL path — so this statement succeeds cleanly.
+
+2. **Remove the test user's hotel memberships.** Deleting from `public.hotel_users` does NOT cascade through `audit_log` (`audit_log.entity_id` is a generic uuid with no FK enforcement; `audit_log` has no direct FK pointing at `hotel_users.id`). The DELETE succeeds:
 
    ```sql
    delete from public.hotel_users
-   where invited_email = 'dev-test@strictons.com'
-     and user_id is null;
+   where invited_email = 'dev-test@strictons.com';
    ```
 
-   No DELETE on the test hotel — see "Why the test hotel row is NOT deleted" above.
+   This removes both the original Phase 3 invite (`user_id IS NULL`) and the accepted row that resulted from the first magic-link sign-in (`user_id` set to dev-test's auth id).
+
+   No DELETE on `public.hotels` or `public.users` — see the two "Why the … row is NOT deleted" sections above.
 
 #### Verify
 
-- `dev-test@strictons.com` can no longer sign in to either admin or partners (the magic link send still works — we send unconditionally per the user-enumeration mitigation — but the `/auth/confirm` step will fail to establish a `public.users` row because the auth.users record is gone).
-- `select count(*) from auth.users where email = 'dev-test@strictons.com'` returns 0.
+- **Sign-in fails.** Submit `dev-test@strictons.com` on the partners or admin sign-in form. The magic-link request submits successfully (anti-enumeration — Phase 3 locked decision), but the link itself cannot complete sign-in. **Verify whether Supabase Auth's `verifyOtp` rejects the banned user cleanly:**
+  - Expected: the `/auth/confirm` handler receives an error from `verifyOtp` and redirects to `/sign-in?error=expired`.
+  - **[FOLLOWUP]** If `verifyOtp` does NOT reject a banned user and a session is established, flag for separate investigation. The defence-in-depth at that point is the `/no-access` redirect (dev-test has no staff row and post-cleanup has no hotel memberships either, so the partners predicate routes to `/no-access` regardless). But a banned-user verifyOtp bypass would be a real Supabase Auth bug worth raising upstream.
+- `select banned_until from auth.users where email = 'dev-test@strictons.com'` returns the far-future timestamp.
 - `select count(*) from public.hotel_users where invited_email = 'dev-test@strictons.com'` returns 0.
 - `select id, slug, name from public.hotels where slug = 'test-beachcomber'` still returns the row — that's intentional. Confirm there are no `hotel_users` references: `select count(*) from public.hotel_users where hotel_id = (select id from public.hotels where slug = 'test-beachcomber')` returns 0.
+- `select email from public.users where email = 'dev-test@strictons.com'` still returns the row — also intentional. The user is banned at the auth layer but the `public.users` row remains because every audit-history reference to its `id` would otherwise break.
+
+#### End-state summary
+
+After this cleanup, the strictons-dev project contains:
+
+- **Test hotel**: present in `public.hotels`, orphaned (no `hotel_users` references, no businesses, no app surface mentions it).
+- **Test user**: present in `auth.users` with `banned_until` set far-future; present in `public.users` with audit history intact; cannot complete sign-in.
+- **Test memberships**: gone (the explicit DELETE in step 2 removed them, since `hotel_users` deletes don't cascade through audit_log).
 
 Once verified, this section of the runbook is done forever. Subsequent staff provisioning skips it.
 
