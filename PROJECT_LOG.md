@@ -139,6 +139,7 @@ This is the lived-experience companion to `git log` — the latter records what 
 - **Test-data cleanup.** `dev-test@strictons.com` + "Test Beachcomber Hotel" remain in `strictons-dev` for verification continuity; cleanup folds into the Phase 4 admin-app provisioning runbook.
 - **E2E coverage beyond sign-in.** Invite/revoke flows have unit-test coverage in `members/actions.test.ts`; Playwright E2E for them is deferred and arrives alongside admin-app E2E in Phase 4.
 - **Vercel Pro features.** Upgraded mid-phase for runner priority and dashboard reasons; future phases benefit from priority builds without further action.
+- **Latency optimisation.** Production page loads feel slow at low traffic due to Vercel function cold-starts (500–1500ms per cold invocation), three Supabase round-trips per protected request (`auth.getUser` + `hotel_users` + `business_users`), and the US-East default region while users are in AU. Phase 3 ships with no perf work. Anchors for future optimisation: (a) add `syd1` to Vercel function regions for AU / Supabase proximity, (b) `React.cache()` of session data within request lifetime where not already done, (c) potential edge-runtime middleware shift (Sentry edge config already wired). Defer until measured real-user friction or page-load > 2s at warm functions. The one `auth.getUser()` round-trip per request is the security boundary we deliberately don't optimise below.
 
 ### What's next
 
