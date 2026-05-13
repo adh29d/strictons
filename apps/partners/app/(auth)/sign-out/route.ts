@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@strictons/db/server';
-import { writeAuditLog } from '@/lib/audit';
+import { writeAuditLog } from '@strictons/db/audit';
 
 /**
  * POST /sign-out

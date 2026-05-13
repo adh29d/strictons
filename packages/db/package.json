@@ -11,7 +11,9 @@
     "./browser": "./src/browser.ts",
     "./session": "./src/session.ts",
     "./roles": "./src/roles.ts",
-    "./auth-types": "./src/auth-types.ts"
+    "./auth-types": "./src/auth-types.ts",
+    "./auth-helpers": "./src/auth-helpers.ts",
+    "./audit": "./src/audit.ts"
   },
   "scripts": {
     "db:start": "supabase start",

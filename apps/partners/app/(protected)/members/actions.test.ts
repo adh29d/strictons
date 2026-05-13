@@ -12,7 +12,7 @@ vi.mock('@strictons/db/server', () => ({
 vi.mock('@strictons/db/roles', () => ({
   getMembershipSet: (...args: unknown[]) => getMembershipSetMock(...args),
 }));
-vi.mock('@/lib/audit', () => ({
+vi.mock('@strictons/db/audit', () => ({
   writeAuditLog: (...args: unknown[]) => writeAuditLogMock(...args),
 }));
 

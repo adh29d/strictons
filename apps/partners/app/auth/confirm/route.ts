@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@strictons/db/server';
 import { createServiceRoleClient } from '@strictons/db/client';
-import { writeAuditLog } from '@/lib/audit';
-import { isSafeNextPath } from '@/lib/auth-link';
+import { writeAuditLog } from '@strictons/db/audit';
+import { isSafeNextPath } from '@strictons/db/auth-helpers';
 
 /**
  * Environment-variable convention.

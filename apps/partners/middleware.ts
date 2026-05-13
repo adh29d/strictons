@@ -2,7 +2,20 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { MembershipSet } from '@strictons/db/auth-types';
 import { createMiddlewareClient } from '@strictons/db/middleware';
 import { getMembershipSet } from '@strictons/db/roles';
-import { decideAuth } from '@/lib/middleware-decision';
+import { decideAuth } from '@strictons/db/auth-helpers';
+
+/**
+ * Partners-side allow predicate for the lifted decideAuth.
+ *
+ *   m.roles is hotel_admin / hotel_user / business_admin / business_user
+ *   m.isStrictonsStaff is the Phase 4 slot — wired in commit 5; if a
+ *   staff user is also a hotel/business member, .roles already grants
+ *   passage. Including isStrictonsStaff here means a staff-only user
+ *   (no hotel/business membership) can also sign in to the partners
+ *   app without hitting /no-access.
+ */
+const partnersAllowWhen = (m: MembershipSet): boolean =>
+  m.roles.length > 0 || m.isStrictonsStaff;
 
 /**
  * Partners-app middleware. Runs on every request matched by `config.matcher`
@@ -52,6 +65,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     memberships,
     pathname: url.pathname,
     search: url.search,
+    allowWhen: partnersAllowWhen,
   });
 
   if (decision.kind === 'redirect') {

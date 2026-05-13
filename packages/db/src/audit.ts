@@ -1,12 +1,24 @@
-import { createServiceRoleClient } from '@strictons/db/client';
-import type { Database, Json } from '@strictons/db/types';
+import { createServiceRoleClient } from './client';
+import type { Database, Json } from './database.types';
 
 /**
- * Environment-variable convention.
+ * Service-role audit-log helper, lifted from apps/partners/lib/audit.ts
+ * in Phase 4 commit 3 because the admin-app hotel CRUD actions in
+ * commit 9 need an identical writer.
  *
- * Env vars are read inside the factory function body, never at module
- * top-level. (writeAuditLog itself doesn't read env, but it transitively
- * uses createServiceRoleClient which does.)
+ * audit_log INSERT is RLS-revoked from authenticated/anon — only the
+ * service role can write. The append-only triggers on the table
+ * block UPDATE / DELETE for every role including service_role, so
+ * once a row lands it cannot be modified.
+ *
+ * This helper intentionally does NOT throw on write failure — audit
+ * issues should never block user-facing flows. Errors are
+ * console.error'd so they surface in Vercel function logs and reach
+ * Sentry via the standard unhandled-error pathway (or, for caught
+ * errors, via Server Action instrumentation).
+ *
+ * Env-var read convention: process.env access happens inside
+ * createServiceRoleClient(), not here.
  */
 
 type ActorRole = Database['public']['Enums']['actor_role'];
@@ -23,18 +35,6 @@ export type AuditLogEntry = {
   entity_business_id?: string | null;
 };
 
-/**
- * Write a single audit_log row via the service-role client.
- *
- * Audit-log INSERT is RLS-revoked from authenticated/anon — only the
- * service role can write. The append-only triggers on the table block
- * UPDATE / DELETE for every role including service_role.
- *
- * This helper intentionally does NOT throw on write failure — audit
- * issues should never block user-facing flows. Errors are console.error'd
- * so they surface in Vercel function logs and Sentry (commit 12) without
- * surfacing to the user.
- */
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
     const service = createServiceRoleClient();

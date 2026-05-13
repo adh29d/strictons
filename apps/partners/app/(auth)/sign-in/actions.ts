@@ -6,8 +6,8 @@ import { createServiceRoleClient } from '@strictons/db/client';
 import { sendMagicLink, EmailSendError } from '@strictons/email/send';
 import { MAGIC_LINK_EXPIRY_MINUTES } from '@strictons/email/constants';
 import { SignInInputSchema } from '@strictons/types/auth';
-import { writeAuditLog } from '@/lib/audit';
-import { buildConfirmUrl, resolvePartnersUrl } from '@/lib/auth-link';
+import { writeAuditLog } from '@strictons/db/audit';
+import { buildConfirmUrl, resolveAppUrl } from '@strictons/db/auth-helpers';
 import type { SignInState } from './types';
 
 /**
@@ -69,7 +69,7 @@ export async function signInWithEmail(
   let sendSucceeded = false;
   try {
     const supabase = createServiceRoleClient();
-    const partnersUrl = resolvePartnersUrl();
+    const partnersUrl = resolveAppUrl('partners');
 
     const { data, error: generateError } = await supabase.auth.admin.generateLink({
       type: 'magiclink',
@@ -96,7 +96,7 @@ export async function signInWithEmail(
     }
 
     const link = buildConfirmUrl({
-      partnersUrl,
+      appUrl: partnersUrl,
       tokenHash,
       type: 'email',
       next,

@@ -8,7 +8,7 @@ import {
   InviteHotelMemberInputSchema,
   RevokeMemberInputSchema,
 } from '@strictons/types/invites';
-import { writeAuditLog } from '@/lib/audit';
+import { writeAuditLog } from '@strictons/db/audit';
 import type { ActionState } from './types';
 
 /**
