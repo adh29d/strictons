@@ -3,7 +3,7 @@ import type { EmailTransport, RenderedEmail } from './types';
 /**
  * E2E-only transport. Sends nothing — pushes the rendered message onto
  * an in-process queue that Playwright reads via a gated test-only
- * Route Handler in apps/partners (`/api/_test/last-email`, only mounted
+ * Route Handler in apps/partners (`/api/test/last-email`, only mounted
  * when E2E_MODE=1).
  *
  * Module-level singleton: every caller sees the same buffer. Tests that

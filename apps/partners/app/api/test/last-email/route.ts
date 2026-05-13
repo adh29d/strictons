@@ -2,12 +2,17 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { findMemoryInboxEntry } from '@strictons/email/transports';
 
 /**
- * GET /api/_test/last-email?to=<email>
+ * GET /api/test/last-email?to=<email>
  *
  * Test-only inbox reader. Returns the most recent rendered email sent
  * to the given address from the in-process memory transport, so
  * Playwright can extract the magic-link URL without parsing real
  * emails.
+ *
+ * Path note: the segment is `test` (not `_test`) because Next.js App
+ * Router silently excludes any folder prefixed with `_` from routing.
+ * The earlier `_test` shape compiled fine but was never mounted, so
+ * Playwright's polling loop saw Next's default 404 page every iteration.
  *
  * Gated by E2E_MODE=1 — production / preview deploys silently 404.
  * This is the same gate the memory transport itself uses (refuses to

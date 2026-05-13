@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
  *   1. Visit /sign-in, submit a fresh email
  *   2. Land on /sign-in/check-inbox
  *   3. Read the magic-link email from the in-process memory transport
- *      via the gated /api/_test/last-email route handler
+ *      via the gated /api/test/last-email route handler
  *   4. Visit the link → verifyOtp succeeds → land on /no-access
  *      (the email has no membership row in the test database, so
  *      middleware sends an authenticated-but-wedged user there)
@@ -47,7 +47,7 @@ test.describe('partners magic-link sign-in', () => {
       html: string;
     } | null = null;
     for (let i = 0; i < 10 && !entry; i++) {
-      const res = await request.get(`/api/_test/last-email?to=${encodeURIComponent(email)}`);
+      const res = await request.get(`/api/test/last-email?to=${encodeURIComponent(email)}`);
       if (res.ok()) {
         const body = (await res.json()) as { entry: typeof entry };
         if (body.entry) {

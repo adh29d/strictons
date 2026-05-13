@@ -85,11 +85,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
  *                                itself authenticates via createServerClient
  *                                and renders a sign-out CTA, so it doesn't
  *                                need middleware to gate it
- *   api/_test                 — gated test-only Route Handlers (commit 13);
+ *   api/test                  — gated test-only Route Handlers (commit 14);
  *                                E2E_MODE controls availability there
  */
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|sign-in|sign-out|auth/confirm|no-access|api/_test).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|sign-in|sign-out|auth/confirm|no-access|api/test).*)',
   ],
 };

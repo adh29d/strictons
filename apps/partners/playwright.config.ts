@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  *   - `webServer` boots `pnpm start` against the production build with
  *     EMAIL_TRANSPORT=memory and E2E_MODE=1 set, so sendMagicLink
  *     pushes into an in-process buffer instead of hitting SendGrid
- *     and the test-only `/api/_test/last-email` route is reachable
+ *     and the test-only `/api/test/last-email` route is reachable
  *   - Supabase env vars (URL / publishable / secret keys) are read
  *     from the host environment — CI's e2e.yml workflow boots local
  *     Supabase and exports them; locally Steven points at strictons-dev
@@ -46,7 +46,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     env: {
       // Email transport configuration: in-memory inbox the test reads
-      // via /api/_test/last-email. The route handler 404s unless
+      // via /api/test/last-email. The route handler 404s unless
       // E2E_MODE=1, so production-shaped deploys can never accidentally
       // expose the inbox.
       EMAIL_TRANSPORT: 'memory',
