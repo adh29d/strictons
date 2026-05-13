@@ -93,7 +93,11 @@ When you decide and proceed, mention what you decided in the summary at the end 
 
 ## End of phase
 
-At the end of each phase (PR merged to `main`, deploy verified, manual verification done), append a new section to `PROJECT_LOG.md` covering "What landed", "Locked decisions", "Gotchas", and "What's deferred". Use existing entries as the template. This is the last commit of the phase, on a small follow-up PR.
+At the end of each phase (CI green on the phase PR, deploy verified, manual verification done), append a new section to `PROJECT_LOG.md` covering "What landed", "Locked decisions", "Gotchas", and "What's deferred". Use existing entries as the template.
+
+The PROJECT_LOG entry is the last commit of the phase. Land it on the existing phase PR — solo-reviewer workflows don't benefit from a separate follow-up PR for the doc-only commit, and the squash-merge flattens the history anyway. (The original "small follow-up PR" convention was designed for multi-reviewer workflows where the doc-only commit warranted its own review pass; the lived working convention is single-PR-per-phase. Refined in Phase 4.)
+
+Related: phase PRs open as draft at the START of the phase, not the end, so CI runs on every push. CI failures surface inside the working loop rather than as an end-of-phase merge-time surprise.
 
 ## Secrets discipline
 
