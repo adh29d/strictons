@@ -111,7 +111,7 @@ test.describe('partners invite + revoke', () => {
     // Page may have landed on / (placeholder) or another protected route;
     // navigate to /members explicitly with the scope query param.
     await admin.goto(`/members?hotel=${hotelId}`);
-    await expect(admin.getByRole('heading', { name: 'Members' })).toBeVisible();
+    await expect(admin.getByRole('heading', { name: 'Members', exact: true })).toBeVisible();
     await expect(admin.getByText(adminEmail)).toBeVisible();
 
     // Submit the invite form.
@@ -171,7 +171,7 @@ test.describe('partners invite + revoke', () => {
     // ----------------------------------------------------------------------
     await invitee.goto('/');
     await invitee.waitForURL('**/no-access');
-    await expect(invitee.getByRole('heading', { name: 'No access' })).toBeVisible();
+    await expect(invitee.getByRole('heading', { name: 'No access', exact: true })).toBeVisible();
     await expect(invitee.getByText(inviteeEmail)).toBeVisible();
 
     await adminCtx.close();
