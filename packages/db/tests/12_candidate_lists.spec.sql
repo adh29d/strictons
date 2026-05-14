@@ -387,14 +387,19 @@ select _test_as_service();
 
 -- T17. Service-role can write status='removed_by_strictons' (the staff-side
 -- soft-delete value introduced by Q3). Bypasses RLS and column GRANTs.
+-- removed_by is set to a real user UUID per the paired-removed CHECK; the
+-- production removeCandidateAsStaff action passes the staff user's id
+-- explicitly (PHASE_6_PLAN.md §3.1). admin_a stands in here — the actor
+-- identity isn't material to this test, only the constraint and policy.
 select lives_ok(
   format(
     $$update public.candidate_businesses
         set status = 'removed_by_strictons',
             removed_at = now(),
-            removed_by = null,
+            removed_by = %L,
             removal_reason = 'staff-side soft-delete'
         where id = %L$$,
+    (select v from _t where k='admin_a'),
     (select v from _t where k='cand_a2')
   ),
   'service_role UPDATE status=removed_by_strictons succeeds (Q3 staff-side path)'
@@ -444,11 +449,14 @@ select throws_ok(
   'partial unique index rejects re-add of (hotel_id, google_place_id) while alive (23505)'
 );
 
--- Soft-delete the original.
+-- Soft-delete the original. removed_by uses admin_a's UUID as a stand-in
+-- for the staff actor — the paired-removed CHECK requires removed_at and
+-- removed_by together; the test exercises the partial index, not actor
+-- identity.
 update public.candidate_businesses
   set status = 'removed_by_strictons',
       removed_at = now(),
-      removed_by = null
+      removed_by = (select v from _t where k='admin_a')
   where id = (select v from _t where k='cand_gp_a');
 
 -- T20. After soft-delete, the partial index excludes the original row, so
