@@ -54,6 +54,20 @@ export default async function EditHotelPage({
       />
 
       <section className="mt-10 border-t border-neutral-200 pt-8">
+        <h2 className="mb-3 text-lg font-semibold">Candidate list</h2>
+        <p className="mb-4 text-sm text-neutral-600">
+          Build and curate this hotel&apos;s candidate business list — manual entry, Google Places
+          search, and CSV upload.
+        </p>
+        <Link
+          href={`/hotels/${hotel.id}/candidates`}
+          className="inline-block rounded bg-neutral-900 px-4 py-2 text-sm text-white"
+        >
+          Open the candidate list
+        </Link>
+      </section>
+
+      <section className="mt-10 border-t border-neutral-200 pt-8">
         <h2 className="mb-3 text-lg font-semibold">Invite a hotel admin</h2>
         <p className="mb-4 text-sm text-neutral-600">
           Sends a magic-link invitation email. The invitee lands in the hotel partner portal after

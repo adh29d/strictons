@@ -460,18 +460,25 @@ All actions: cookie-based authenticated client (NOT service-role); RLS is the ac
 
 ## 4. Admin-app UI surfaces
 
-Routes anchored under `apps/admin/app/(protected)/hotels/[id]/candidates/`:
+Routes anchored under `apps/admin/app/(protected)/hotels/[id]/candidates/`. Component filenames are kebab-case to match the Phase 5 lived convention (`invite-hotel-admin-form.tsx`, `hotel-admins-list.tsx`, …), not the PascalCase this section originally sketched.
 
-- `page.tsx` — server component, lists all candidates (alive + removed-toggle). Renders three add affordances (manual, Google Places search, CSV upload) and the list-state controls (mark-ready, reopen) gated by current `hotels.approval_state`.
-- `_components/AddCandidateManualForm.tsx` — client component, mirrors `InviteHotelAdminForm`'s `useActionState` shape.
-- `_components/GooglePlacesSearchPanel.tsx` — client component. Search input → POSTs `/api/places/search` → renders top-10 results → each result has an "Add" button that submits to the `addCandidateFromGooglePlaces` Server Action. No client-side Google calls.
-- `_components/CsvUploadForm.tsx` — client component. `<input type="file" accept=".csv,text/csv" />` submitted via Server Action. Renders per-row error list and import-count summary from action state.
-- `_components/CandidateListTable.tsx` — server component, renders alive rows with per-row "Remove" affordance (Strictons-staff remove form).
-- `_components/RemovedCandidatesPanel.tsx` — server component, collapsible "Show {N} removed" — staff visibility into deletions.
-- `_components/ListStateControls.tsx` — client component, conditionally renders:
-  - `candidate_list_drafted` → "Mark ready for hotel review" button (form → `markCandidateListReadyForReview`)
-  - `candidate_list_with_hotel` → "Reopen for editing" button + "Hotel review in progress" status text
-  - `candidate_list_approved` → "Reopen" button (form → `reopenCandidateList`, defaults to `candidate_list_drafted` target via a select)
+- `page.tsx` — server component. Fetches the hotel row via service-role, `notFound()` on miss, `force-dynamic`. Shows `hotels.approval_state` prominently as a status badge, renders the candidate list table, the three add affordances (manual, Google Places search, CSV upload), and the list-state controls. A nav link to this route is added to `/hotels/[id]`.
+- `_components/add-candidate-manual-form.tsx` — client component, mirrors `InviteHotelAdminForm`'s `useActionState` shape; per-field errors keyed by schema field name.
+- `_components/google-places-search-panel.tsx` + `_components/google-place-result-row.tsx` — client components. Search input (300ms debounce, minimum query length 2 — matches `GooglePlacesSearchInputSchema`) → POSTs `/api/places/search` (an `AbortController` cancels the in-flight request when the query changes) → renders results, each as a `google-place-result-row` with its own `useActionState` "Add" form submitting to `addCandidateFromGooglePlaces`. No client-side Google calls.
+- `_components/csv-upload-form.tsx` — client component. `<input type="file" accept=".csv,text/csv" />` submitted via `uploadCandidateCsv`. Renders the import-count summary and the per-row rejection list from action state. The page links a static `apps/admin/public/candidate-template.csv` (header row only) so staff can grab the canonical column headers.
+- `_components/candidate-list-table.tsx` — server component, fetches the hotel's alive (`removed_at IS NULL`) candidate rows via service-role, renders each with a per-row `remove-candidate-button`.
+- `_components/remove-candidate-button.tsx` — client component, per-row `useActionState` against `removeCandidateAsStaff`; a "Remove" button expands an inline optional-reason input + a confirming submit.
+- `_components/list-state-controls.tsx` — client component, conditionally renders:
+  - `candidate_list_drafted` → "Mark ready for hotel review" form → `markCandidateListReadyForReview`
+  - `candidate_list_with_hotel` → "Reopen list" form → `reopenCandidateList` (target selector offers `candidate_list_drafted` only — reopening `with_hotel → with_hotel` is the no-op the action rejects)
+  - `candidate_list_approved` → "Reopen list" form → `reopenCandidateList` (target selector offers both `drafted` and `with_hotel`)
+  - any other state → a "no actions available in this stage" note
+
+**Commit-8 scope decisions** (the three the commit-8 prompt pre-flagged, all accepted as the stated defaults):
+
+- **Removed candidates are filtered out of the view with no show-removed toggle in this commit.** The originally-sketched `RemovedCandidatesPanel.tsx` (collapsible "Show {N} removed") is **deferred** — staff visibility into soft-deletes is a nice-to-have, not part of the curation loop, and the audit log already records every removal. It can land in a later commit if a concrete need surfaces.
+- **Google Places search-as-you-type:** 300ms debounce + minimum query length 2 (the `GooglePlacesSearchInputSchema` floor).
+- **CSV upload:** a static "Download the template" link to `apps/admin/public/candidate-template.csv` (the canonical header row), so staff don't have to guess the column names.
 
 No surface for "approve" on admin side — that's hotel-only.
 
