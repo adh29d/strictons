@@ -435,7 +435,12 @@ export async function markCandidateListReadyForReview(
           action: 'candidate_list_mark_ready_for_review_failed',
           entity_type: 'hotels',
           entity_id: hotelId,
-          entity_hotel_id: hotelId,
+          // null, not hotelId: audit_log.entity_hotel_id is a FK to
+          // hotels(id), and the hotel that triggered this failure does
+          // not exist — a non-existent id would FK-violate the audit
+          // INSERT. Matches the hotel_not_found branches in the other
+          // candidate actions.
+          entity_hotel_id: null,
           after: {
             reason: 'hotel_not_found',
             message: lookupError?.message ?? null,
@@ -563,7 +568,12 @@ export async function reopenCandidateList(
           action: 'candidate_list_reopen_failed',
           entity_type: 'hotels',
           entity_id: hotelId,
-          entity_hotel_id: hotelId,
+          // null, not hotelId: audit_log.entity_hotel_id is a FK to
+          // hotels(id), and the hotel that triggered this failure does
+          // not exist — a non-existent id would FK-violate the audit
+          // INSERT. Matches the hotel_not_found branches in the other
+          // candidate actions.
+          entity_hotel_id: null,
           after: {
             reason: 'hotel_not_found',
             message: lookupError?.message ?? null,

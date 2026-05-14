@@ -632,6 +632,22 @@ describe('markCandidateListReadyForReview', () => {
     });
   });
 
+  it('hotel_not_found audit passes entity_hotel_id: null (commit-5 FK-violation regression)', async () => {
+    // audit_log.entity_hotel_id is a FK to hotels(id); the hotel that
+    // triggered hotel_not_found does not exist, so passing its id would
+    // FK-violate the audit INSERT. Commit 5 shipped this branch with
+    // entity_hotel_id: hotelId — latent because writeAuditLog swallows
+    // the FK error. This is the assertion that would have caught it.
+    const { client } = makeServiceClient({ hotelLookup: { data: null, error: null } });
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { markCandidateListReadyForReview } = await import('./actions');
+    await markCandidateListReadyForReview({}, makeMarkReadyFormData());
+
+    const entry = auditEntry('candidate_list_mark_ready_for_review_failed');
+    expect(entry?.entity_hotel_id).toBeNull();
+  });
+
   it('audits wrong_state when the hotel is not in candidate_list_drafted', async () => {
     const { client } = makeServiceClient({
       hotelLookup: {
@@ -783,6 +799,22 @@ describe('reopenCandidateList', () => {
     expect(auditEntry('candidate_list_reopen_failed')).toMatchObject({
       after: { reason: 'hotel_not_found' },
     });
+  });
+
+  it('hotel_not_found audit passes entity_hotel_id: null (commit-5 FK-violation regression)', async () => {
+    // audit_log.entity_hotel_id is a FK to hotels(id); the hotel that
+    // triggered hotel_not_found does not exist, so passing its id would
+    // FK-violate the audit INSERT. Commit 5 shipped this branch with
+    // entity_hotel_id: hotelId — latent because writeAuditLog swallows
+    // the FK error. This is the assertion that would have caught it.
+    const { client } = makeServiceClient({ hotelLookup: { data: null, error: null } });
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { reopenCandidateList } = await import('./actions');
+    await reopenCandidateList({}, makeReopenFormData());
+
+    const entry = auditEntry('candidate_list_reopen_failed');
+    expect(entry?.entity_hotel_id).toBeNull();
   });
 
   it('audits wrong_state when the hotel is not in a reopenable state', async () => {
