@@ -1,6 +1,8 @@
 # Phase 6 plan — Candidate-list curation
 
-Plan-only artefact for review. No code in this round.
+Living spec for Phase 6. Plan-review questions answered inline in §12. No code in this round.
+
+**Q-answers locked in this revision:** Q1 agreed (existing enum); Q2 agreed (papaparse, with header-normalisation note); Q3 reversed (new `removed_by_strictons` enum value); Q4 agreed (staff-alone reopen) + optional `reason` added; Q5 agreed (in-memory-only, per-instance) + rate-limit-is-best-effort note; Q6 agreed (drop+recreate policy, plus pgTAP audit result documented); Q7 agreed (nested partners route).
 
 ---
 
@@ -34,15 +36,28 @@ No pushback on items 1, 3, 4, 5, or 7. Item 6's framing answer is "use the exist
 
 ## 1. Schema changes
 
-One migration appended to the existing `candidate_businesses` table. No new tables.
+One migration appended to the existing `candidate_businesses` table. No new tables. One append-only enum value added.
+
+### Migration numbering — verification
+
+`packages/db/supabase/migrations/` currently contains 15 files. PROJECT_LOG's "migration N" convention (Phase 3's PROJECT_LOG calls `20260505100000_partner_invite_tracking.sql` "migration 14") counts structural cluster migrations + structural follow-ups, treating the seed-mood-options reference-data migration consistently with PROJECT_LOG's narrative. By that convention, Phase 6's new migration is **migration 15**. The filename below uses a Phase-6-era timestamp prefix; the ordinal "migration 15" appears in commit messages and §10.
 
 ### Migration: `20260513100000_candidate_businesses_phase6.sql`
 
-**Type:** append to existing `candidate_businesses` table. No new enum types, no new tables.
+**Type:** append to existing `candidate_businesses` table. One enum value appended to `public.candidate_status`. No new tables.
 
 **Shape (rough SQL):**
 
 ```sql
+-- 0. Append `removed_by_strictons` to the candidate_status enum.
+--    Per Q3 (revised): staff-side soft-deletes set status='removed_by_strictons';
+--    hotel-side keeps status='removed_by_hotel'. Enum appends are safe and
+--    append-only-compatible. The append must run in its own statement; the
+--    new value is referenced by policies further down in the same migration,
+--    which is supported in Postgres 14+ (no separate transaction required
+--    for in-line use within the same migration in Supabase's runner).
+alter type public.candidate_status add value if not exists 'removed_by_strictons';
+
 -- 1. Soft-delete shape (locked decision 5)
 alter table public.candidate_businesses
   add column removed_at timestamptz,
@@ -163,10 +178,43 @@ comment on column public.candidate_businesses.removed_by is
 
 - `removed_at` + `removed_by` + optional `removal_reason` matches locked decision 5 and is the template for the deferred soft-delete work on `hotels` and `businesses`. `removal_reason` is `text`, not enum — both because the use case is free-form context ("hotel said this place closed", "duplicate of …"), and because committing to an enum now would force a Phase 7+ migration the first time staff want a value not on the list.
 - The CHECK pairs `removed_at` and `removed_by`. Soft-delete is a paired operation; the schema enforces it. `removal_reason` is independent — optional.
-- `proposed_by` is new. The existing schema has `decided_by_user_id` (who approved/removed) but no symmetric "who added it." Phase 6 needs this to attribute hotel-manual-add rows to the hotel admin in the UI and the audit trail; it also captures the Strictons staff user on staff adds.
+- `proposed_by` is new. Phase 6 needs this to attribute hotel-manual-add rows to the hotel admin and staff-add rows to the staff user. See "`decided_by_user_id` clarification" immediately below for how the new column relates to the existing `decided_by_user_id` field.
 - `phone`, `website`, `contact_email` cover the "candidate carries identifying data inline" half of locked decision 1. Social handles are deferred — they're a `businesses`-row concept per migration 4 and aren't needed until signing.
 - The partial unique index on `(hotel_id, google_place_id)` filtered to alive + not-signed rows prevents the most likely staff mistake (re-adding the same Google place); doesn't block legitimate re-adds after removal (the original row's `removed_at` excludes it from the index).
-- Per §0.1, the existing per-row `status='approved'` value is removed from the allowed hotel-admin UPDATE transitions. The enum value still exists, but no hotel-side surface emits it and no Phase 6 code path uses it. We don't migrate it out (locked decision: append-only on enums); it stays as a vestigial value with a comment.
+- Per §0.1 (and Q6), the existing per-row `status='approved'` value is removed from the allowed hotel-admin UPDATE transitions. The enum value still exists (append-only enum rule), but no Phase 6 surface emits it or transitions to it. The vestigial value is documented with an in-migration comment so a future reader sees the deprecation intent.
+
+### `decided_by_user_id` clarification — what it tracks now, post-Phase-6
+
+The existing `candidate_businesses.decided_by_user_id` column was introduced in migration 5 alongside `decided_at` and is currently set by the Phase-2-locked hotel-admin UPDATE policy when a hotel admin transitions the row's status to `approved` or `removed_by_hotel`. The intent was a single "who acted on this row" column covering both approval and removal in one shape.
+
+Phase 6 refines this. After Phase 6:
+
+- **`proposed_by`** captures who added the row (staff or hotel admin), set once at INSERT and never updated.
+- **`removed_by` + `removed_at`** capture who soft-deleted the row, set together at the removal transition.
+- **`decided_by_user_id` + `decided_at`** retain their original purpose for the Phase 7+ Strictons-side `signed_to_placement` transition — i.e. "who recorded that this candidate signed and became a real business." The list-level approval the hotel now performs lives on `hotels.candidate_list_approved_at` per §0.1, NOT on per-row `decided_*` columns. The per-row `decided_*` columns are unused by Phase 6 hotel-side flows; they are reserved for Phase 7+ Strictons-side promotion bookkeeping.
+
+The column is NOT redundant for the soft-delete case — `removed_by` carries that signal cleanly. But it IS redundant for the list-level approval case, which Phase 6 deliberately moves elsewhere. The column stays (append-only after applied — locked decision); Phase 6 code does not write or read it. A `COMMENT ON COLUMN` is added in the migration to document the post-Phase-6 semantics so a future reader doesn't re-purpose the column accidentally:
+
+```sql
+comment on column public.candidate_businesses.decided_by_user_id is
+  'Reserved for Phase 7+ Strictons-side signed_to_placement bookkeeping. ' ||
+  'Not written or read by Phase 6 code paths — hotel removal uses removed_by, ' ||
+  'list-level approval lives on hotels.candidate_list_approved_at.';
+comment on column public.candidate_businesses.decided_at is
+  'Pairs with decided_by_user_id; same Phase 7+ reservation note.';
+```
+
+### pgTAP audit for the Q6 policy narrowing
+
+Audited specs 01, 02, 03, 04, 07, 08 (the candidate_businesses-touching suites) for any test that exercises the hotel-admin `status='approved'` UPDATE path being removed by the policy narrowing. **Audit result: no existing test exercises that path.** The current candidate_businesses tests cover:
+
+- spec 01: anon SELECT denied → unaffected
+- spec 02: service-role INSERT (Strictons curation path) → unaffected
+- spec 03: hotel-A admin sees only their own list (SELECT) → unaffected
+- spec 07: hotel-admin INSERT denied; service-role INSERT works → unaffected
+- spec 08: service-role SELECT reachable → unaffected
+
+The Q6 policy change is therefore additive to the test surface: the new spec 12 (§9.1) adds positive coverage for the now-allowed hotel-admin UPDATE soft-delete path and negative coverage asserting `status='approved'` UPDATE attempts by hotel admin are rejected. No existing spec needs an edit. Commit 1 lands the migration and spec 12 together; if a spec edit DID turn out to be needed, it would land in the same commit per the prompt.
 
 ### Type generation
 
@@ -188,7 +236,7 @@ import { z } from 'zod';
 // Mirror DB enums for literal-array exhaustiveness checks in consumers.
 export const CANDIDATE_SOURCES = ['google_places', 'csv', 'manual'] as const;
 export const CANDIDATE_STATUSES = [
-  'proposed', 'approved', 'removed_by_hotel', 'signed_to_placement',
+  'proposed', 'approved', 'removed_by_hotel', 'removed_by_strictons', 'signed_to_placement',
 ] as const;
 export type CandidateSource = (typeof CANDIDATE_SOURCES)[number];
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
@@ -251,6 +299,10 @@ export const ReopenCandidateListInputSchema = z.object({
   // Staff reopens to either drafted (heavy edit needed) or with_hotel (just
   // un-approve). Both transitions are audit-logged with the same action.
   targetState: z.enum(['candidate_list_drafted', 'candidate_list_with_hotel']),
+  // Optional free-text reason (Q4). Surfaces in the audit log's `after`
+  // payload only; no UI listing of past reasons in Phase 6 (audit-log
+  // visibility is the read surface).
+  reason: z.string().trim().max(500).optional().nullable(),
 });
 export type ReopenCandidateListInput = z.infer<typeof ReopenCandidateListInputSchema>;
 ```
@@ -305,12 +357,12 @@ All actions: gated by `requireStaff()` (admin-lib helper from Phase 5); wrapped 
 
 | Input | `FormData` with `hotelId`, `candidateId`, optional `reason` |
 | Validates | `RemoveCandidateInputSchema` |
-| Update shape | Service-role UPDATE: `{ removed_at: now(), removed_by: staffUserId, removal_reason: reason ?? null, status: 'removed_by_hotel' /* see note */ }` |
+| Update shape | Service-role UPDATE: `{ removed_at: now(), removed_by: staffUserId, removal_reason: reason ?? null, status: 'removed_by_strictons' }` |
 
-*Note on `status` for staff-side removal:* the existing enum has `removed_by_hotel` only. For consistency with the soft-delete model, staff-side removals also set `status='removed_by_hotel'` — the canonical "is removed" signal is `removed_at`, not `status`. We do NOT add a `removed_by_strictons` enum value (locked decision: append-only on enums; the `removed_by` column captures the actor). Open as Q3 because it's the kind of small overload worth confirming.
+*Note on `status` for staff-side removal (Q3 — resolved):* a new `removed_by_strictons` value is appended to `public.candidate_status` in the §1 migration. Staff-side removals set `status='removed_by_strictons'`; hotel-side removals continue to set `status='removed_by_hotel'`. The append is safe (enum-append is the canonical Postgres pattern). The `removed_at` + `removed_by` columns remain the canonical "is removed" filter; the status value carries the actor-class signal cleanly without overloading the hotel-only value.
 
 | Returns success | `{ ok: true, message: 'Candidate removed.' }` |
-| Audit | `candidate_removed`, `actor_role='strictons_staff'`, `after={ reason, removed_at }` |
+| Audit | `candidate_removed`, `actor_role='strictons_staff'`, `after={ reason, removed_at, status: 'removed_by_strictons' }` |
 
 #### Action: `markCandidateListReadyForReview(prev, formData) → MarkReadyState`
 
@@ -323,12 +375,12 @@ All actions: gated by `requireStaff()` (admin-lib helper from Phase 5); wrapped 
 
 #### Action: `reopenCandidateList(prev, formData) → ReopenState`
 
-| Input | `FormData` with `hotelId`, `targetState` (`candidate_list_drafted` or `candidate_list_with_hotel`) |
-| Validates | `ReopenCandidateListInputSchema` |
+| Input | `FormData` with `hotelId`, `targetState` (`candidate_list_drafted` or `candidate_list_with_hotel`), optional `reason` |
+| Validates | `ReopenCandidateListInputSchema` (now includes optional `reason` per Q4) |
 | Preconditions | `hotels.approval_state` must be `candidate_list_approved` OR `candidate_list_with_hotel` (the latter is "un-mark-ready"). Reject other states. |
 | Update shape | Service-role UPDATE on `hotels`: `{ approval_state: targetState, candidate_list_approved_at: null }`. If targetState is `candidate_list_drafted`, also clears `candidate_list_approval_due_at`; if it is `candidate_list_with_hotel`, leaves the existing due_at alone OR resets to `now() + 14 days` (recommend: leaves the existing — staff is correcting course, not restarting the clock). |
 | Returns success | `{ ok: true, message: 'List reopened.' }` |
-| Audit | `candidate_list_reopened`, `actor_role='strictons_staff'`, `after={ from_state, to_state, reason? }` — `reason` deferred (no UI for it Phase 6; Q4) |
+| Audit | `candidate_list_reopened`, `actor_role='strictons_staff'`, `after={ from_state, to_state, reason }` — `reason` present in payload when supplied, omitted (or `null`) when not. UI surfaces a single optional free-text input below the target-state selector. |
 
 ### 3.2 Route Handler — admin app — `apps/admin/app/api/places/search/route.ts`
 
@@ -339,7 +391,7 @@ All actions: gated by `requireStaff()` (admin-lib helper from Phase 5); wrapped 
 | External call | Google Places Text Search via the adapter in §5. |
 | Response success | `{ ok: true, results: Array<{ placeId, name, formattedAddress, primaryType?, location? }> }`. Capped at top 10 results. |
 | Response failure | `{ ok: false, error: string }` with HTTP 400 (validation), 401 (unauth), 429 (rate-limit), 502 (upstream Google failure) status codes. |
-| Rate limit | Per staff user, in-memory token bucket: 30 requests / 60 s. On overflow → 429 with `Retry-After` header. The bucket lives on `globalThis` keyed by `Symbol.for('@strictons/admin/places-rate-limit')` to survive the module-instance-split issue. Phase 6 only; persistent rate limiting deferred. |
+| Rate limit | Per staff user, in-memory token bucket: 30 requests / 60 s. On overflow → 429 with `Retry-After` header. The bucket lives on `globalThis` keyed by `Symbol.for('@strictons/admin/places-rate-limit')` to survive the module-instance-split issue. **Per-Vercel-function-instance only — best-effort cost guard, not a security boundary (Q5).** A staff user routed to a second cold Vercel function instance gets a fresh bucket; the worst case is N×30 requests/min where N is the number of warm instances (in practice, 1-2 during Phase 6 verification volume). Persistent rate-limiting via a Supabase table is deferred alongside the persistent cache table; both arrive together if and when traffic patterns warrant. |
 | Audit | NOT every search (would balloon audit). Audit only on the `addCandidateFromGooglePlaces` Server Action when a place is actually added. Searches are observable via Sentry transactions + Google's own console. |
 
 No corresponding details Route Handler — `addCandidateFromGooglePlaces` fetches details directly inside the Server Action (single round-trip needed at add time; no client interactivity).
@@ -461,7 +513,9 @@ Pricing reference (Phase 6 cost-bounding):
 
 Short-TTL in-memory cache keyed by normalised `query` (search) and `placeId` (details). TTL: 60 s for search, 600 s for details (place metadata is stable). Storage on `globalThis[Symbol.for('@strictons/admin/places-cache')]` to handle the Phase 3 module-instance-split gotcha. Capped LRU at 500 entries.
 
-Persistent cache table deferred. The cost calculation above supports staying in-memory for Phase 6; a persistent table is justified only if (a) we hit the free-credit cap repeatedly, or (b) Strictons staff begin re-using the same searches across sessions in a way that warrants cross-session caching.
+**Per-Vercel-function-instance only** (same caveat as the rate limit in §3.2): a second cold function instance gets a fresh cache. The worst case is the same query being charged to Google once per warm instance per TTL window — at Phase 6 volume, negligible relative to the free credit. Persistent cache table deferred per Q5.
+
+A persistent table is justified only if (a) we hit the free-credit cap repeatedly, (b) Strictons staff begin re-using the same searches across sessions in a way that warrants cross-session caching, or (c) Phase 7+ adds a second caller (e.g. signing-time place lookups) that legitimately benefits from days-long caching.
 
 ### 6.5 Error handling
 
@@ -494,6 +548,8 @@ Reasons over client-side parsing:
 - One implementation to test.
 
 ### 7.2 Column contract (case-insensitive headers, trim on read)
+
+**Header normalisation (Q2 note):** papaparse does NOT lowercase or trim header names by default — it returns them verbatim from the CSV. Phase 6 normalises headers to `header.trim().toLowerCase()` before per-row validation, so spreadsheets that export with `Name`, ` website `, `Contact_Email` etc. land on the right schema fields. The CSV-parser helper does this header rewrite as the first step after parse, and the unit tests in §9.2 explicitly cover capitalised + whitespace-padded header variants.
 
 | Column | Required | Notes |
 |---|---|---|
@@ -539,13 +595,13 @@ Per Phase 5's frozen-event-name discipline, all new event names below. Existing 
 | `candidate_add_failed` | `strictons_staff` \| `hotel_admin` | Failed add. `after.reason` ∈ `{validation_failed, hotel_not_found, place_not_found, places_api_failed, duplicate_place, insert_failed, list_not_editable}` |
 | `candidate_csv_imported` | `strictons_staff` | Successful CSV import. `after = { imported, rejected }` counts. |
 | `candidate_csv_import_failed` | `strictons_staff` | Failed CSV import. `after.reason` ∈ `{validation_failed, oversized, too_many_rows, missing_name_column, parse_failed, insert_failed}` |
-| `candidate_removed` | `strictons_staff` \| `hotel_admin` | Successful soft-delete. `after = { reason, removed_at }` |
+| `candidate_removed` | `strictons_staff` \| `hotel_admin` | Successful soft-delete. `after = { reason, removed_at, status }` — `status` is `'removed_by_strictons'` for staff removals (Q3), `'removed_by_hotel'` for hotel removals. |
 | `candidate_remove_failed` | `strictons_staff` \| `hotel_admin` | Failed soft-delete. `after.reason` ∈ `{not_found, cross_hotel_smuggling, already_removed, list_not_editable, update_failed}` |
 | `candidate_list_marked_ready_for_review` | `strictons_staff` | Successful transition `drafted → with_hotel`. `after = { candidate_list_approval_due_at }` |
-| `candidate_list_marked_ready_for_review_failed` | `strictons_staff` | Failure. `after.reason` ∈ `{wrong_state, update_failed}` |
+| `candidate_list_mark_ready_for_review_failed` | `strictons_staff` | Failure. `after.reason` ∈ `{wrong_state, update_failed}`. **Verb-form on failure, matching Phase 5's `hotel_admin_invite_failed` convention.** Past-tense success name + verb-form failure name is the locked pattern. |
 | `candidate_list_approved` | `hotel_admin` | Successful transition `with_hotel → approved`. `after = { approved_at }` |
 | `candidate_list_approve_failed` | `hotel_admin` | Failure. `after.reason` ∈ `{wrong_state, update_failed}` |
-| `candidate_list_reopened` | `strictons_staff` | Successful staff reopen. `after = { from_state, to_state }` |
+| `candidate_list_reopened` | `strictons_staff` | Successful staff reopen. `after = { from_state, to_state, reason }` — `reason` present when supplied via the Q4 optional input, else `null` or absent. |
 | `candidate_list_reopen_failed` | `strictons_staff` | Failure. `after.reason` ∈ `{wrong_state, invalid_target_state, update_failed}` |
 
 `entity_type` for candidate row actions: `'candidate_businesses'`. For list-state actions: `'hotels'` with `entity_id = hotelId`. All entries carry `entity_hotel_id = hotelId` for the per-hotel audit-scope index to do its job.
@@ -567,24 +623,26 @@ Coverage:
 - Hotel admin CANNOT INSERT into another hotel. Asserts policy violation.
 - Hotel admin CANNOT INSERT with `proposed_by` set to a different user. Asserts policy violation.
 - Hotel admin can UPDATE a row to set `removed_at=now(), removed_by=auth.uid(), status='removed_by_hotel', removal_reason='...'`. Asserts success.
-- Hotel admin CANNOT UPDATE a row to set status to anything other than `removed_by_hotel` (e.g. `signed_to_placement`). Asserts policy violation.
+- Hotel admin CANNOT UPDATE a row to set status to anything other than `removed_by_hotel` (e.g. `signed_to_placement`, `approved`, or `removed_by_strictons`). Asserts policy violation for each. **The `status='approved'` rejection is the explicit Q6 narrowing assertion.**
 - Hotel admin CANNOT UPDATE another hotel's row.
 - Hotel admin can UPDATE `hotels.approval_state` from `candidate_list_with_hotel` to `candidate_list_approved` only. Asserts success.
 - Hotel admin CANNOT UPDATE `hotels.approval_state` from any other state.
 - Hotel admin CANNOT UPDATE `hotels.approval_state` to anything other than `candidate_list_approved`.
+- **Service-role UPDATE setting `status='removed_by_strictons'` succeeds (Q3 path).** Bypasses RLS via service-role; verifies the enum append is wired and the column GRANT model lets the staff-side action work.
+- The new `removed_by_strictons` enum value is present in `pg_enum` and ordered after `removed_by_hotel`. (Schema-shape sanity check; cheap.)
 - The partial unique index rejects re-adding the same `(hotel_id, google_place_id)` when the previous row is alive.
 - The partial unique index ALLOWS re-adding `(hotel_id, google_place_id)` after the previous row is `removed_at IS NOT NULL`.
 - `candidate_businesses_removed_pair_check` rejects `removed_at` set without `removed_by` and vice versa.
 - Unauth (anon) cannot SELECT, INSERT, UPDATE candidate_businesses.
 
-Plus the existing test 21 in `01_unauth.spec.sql` (structural audit for orphan GRANTs) automatically catches the new column GRANTs without backing policies — no edit there needed.
+Plus the existing test 21 in `01_unauth.spec.sql` (structural audit for orphan GRANTs) automatically catches the new column GRANTs without backing policies — no edit there needed. The Q6 audit (documented in §1) confirmed no existing spec needs an edit to accommodate the policy narrowing; new spec 12 carries the full positive + negative coverage.
 
 ### 9.2 Unit tests
 
 - `packages/types/src/candidates.test.ts` — schema positive/negative cases.
 - `apps/admin/lib/google-places.test.ts` — `fetch` mocked; happy path, 4xx error, 5xx error, timeout, field-mask presence, cache hit, cache miss, TTL expiry, LRU eviction at 500 entries, rate-limit-bucket-overflow behaviour.
 - `apps/admin/lib/parse-candidates-csv.test.ts` — well-formed CSV; missing optional columns; missing required `name` column (fatal); quoted-comma fields; BOM-prefixed file; per-row validation failure mix; >500 rows (fatal); >1 MB (fatal); empty file.
-- `apps/admin/app/(protected)/hotels/[id]/candidates/actions.test.ts` — every action, every branch (per Phase 5 pattern). `revalidatePath` mocked. `createServiceRoleClient` mocked.
+- `apps/admin/app/(protected)/hotels/[id]/candidates/actions.test.ts` — every action, every branch (per Phase 5 pattern). `revalidatePath` mocked. `createServiceRoleClient` mocked. **Explicitly covers the `addCandidateFromGooglePlaces` Postgres 23505 → `duplicate_place` error-mapping branch** — i.e. when the partial unique index rejects the INSERT, the action returns `{ ok: false, fieldErrors: { placeId: '<message pointing at existing row>' } }` and audits `candidate_add_failed` with `reason: 'duplicate_place'`. (The constraint itself is tested at pgTAP level; the action's error-mapping is tested here.) Also covers the staff-removal status=`removed_by_strictons` write (Q3) and the reopen `reason` payload presence/absence (Q4).
 - `apps/admin/app/api/places/search/route.test.ts` — auth gate, rate limit, success, validation failure, upstream error.
 - `apps/partners/app/(protected)/hotels/[id]/candidates/actions.test.ts` — same coverage shape on the partners side.
 
@@ -621,7 +679,11 @@ The `e2e-admin.yml` workflow gains a step to provision the mocked Places respons
 
 Numbered, dependency-ordered, one logical change each.
 
-1. **Migration 16 + pgTAP spec 12 + type regen.** Adds the columns, policies, indexes, and constraints in §1. Regenerates `database.types.ts`. New pgTAP spec covers the new RLS surface. CI gate: db-test, typecheck.
+**Commit 1 opens the draft PR** (per CLAUDE.md's "draft PRs open at the START of each phase, not the end" and Phase 4's lived convention). Subsequent commits push to the same PR. CI gates run on every push so failures surface inside the working loop rather than at end-of-phase merge time.
+
+**If any CLAUDE.md convention surfaces during implementation** (e.g. a vendor-secret env var convention from the Google Places work, or an in-memory caching pattern worth codifying), the CLAUDE.md edit rides on the same Phase 6 PR — no standalone CLAUDE.md commit, consistent with the single-PR-per-phase convention.
+
+1. **Migration 15 + pgTAP spec 12 + type regen.** Adds the enum append, columns, policies, indexes, and constraints in §1. Regenerates `database.types.ts`. New pgTAP spec covers the new RLS surface (including the Q6 narrowing assertion and the Q3 `removed_by_strictons` path). **Opens the draft PR with a placeholder body describing the phase scope.** CI gate: db-test, typecheck.
 
 2. **`@strictons/types/candidates` subpath + unit tests.** Zod schemas + literal arrays. Adds `./candidates` to `packages/types/package.json` exports. Unit tests for every schema. No app changes yet.
 
@@ -667,22 +729,40 @@ No new GitHub repo-level secrets beyond the Places API key. No new email-templat
 
 ---
 
-## 12. Plan-review questions
+## 12. Plan-review questions — resolved
 
-**Q1 — List-state column placement.** §0.1 argues that the existing `hotels.approval_state` enum already encodes the lifecycle and that adding a new column would duplicate semantics. Locked decision 6 explicitly asks for my call. My call: use the existing enum, no new column or table. Do you agree?
+All Q1-Q7 settled in the review round. Recorded here for reference; the answers are already reflected in §§0-11 above (this is the living spec).
 
-**Q2 — `papaparse` as a new dep.** §7.3 argues for it over hand-rolled CSV splitting and over `csv-parse`. Are you OK with the new dep, or would you prefer hand-rolled for the constrained column contract we have? (If hand-rolled, I'll note edge cases like quoted-comma fields explicitly and we accept the upgrade work if a future column carries free-text commas.)
+**Q1 — List-state column placement. RESOLVED: agreed.** Use the existing `hotels.approval_state` enum. No new column or table. (§0.1, §1, §3.)
 
-**Q3 — Staff-side `candidate_removed` status overload.** §3.1's `removeCandidateAsStaff` sets `status='removed_by_hotel'` even though the actor is staff, with the rationale that `removed_at`+`removed_by` are the canonical "is removed" signal and `removed_by_hotel` is the only available enum value. Alternative: append a new `removed_by_strictons` enum value (one-line migration; safe append). My preference: overload, because the `removed_by` column already captures the actor. Do you prefer the cleaner enum value (and one extra append-only migration)?
+**Q2 — `papaparse` as a new dep. RESOLVED: agreed.** Use papaparse. Headers normalised to `header.trim().toLowerCase()` before zod validation — papaparse does NOT do this by default. (§7.2, §7.3.)
 
-**Q4 — Reopen authority and reason capture.** Locked decision 6 says staff can reopen; the prompt asks whether reopens require both staff and hotel action or staff alone. My recommendation: staff alone, audit-logged. No "request to reopen" UX on the hotel side in Phase 6 (out of scope; if a hotel changes their mind, they email Strictons). Second sub-question: should `reopenCandidateList` capture a free-text `reason` (audit-only) at the time of reopening? Phase 6 inclination: no — defer to Phase 7+ if the audit history alone proves insufficient. Confirm both, or push back.
+**Q3 — Staff-side removal status. RESOLVED: append `removed_by_strictons`.** New enum value appended in the §1 migration. Staff-side removals set `status='removed_by_strictons'`; hotel-side keeps `status='removed_by_hotel'`. Reflected in `@strictons/types/candidates` literal array (§2), action contracts (§3.1), pgTAP coverage (§9.1), and audit shape (§8). (Reversed from the plan's original preference.)
 
-**Q5 — Google Places caching boundary.** §6.4 proposes short-TTL in-memory only (60s search, 600s details), `globalThis`-keyed. Persistent cache table deferred. The locked decision explicitly says to default to in-memory; the question is whether you want me to propose the persistent table now anyway because Phase 7+ adds more search traffic (the Place Details path during signing — which we could legitimately cache for days). My recommendation: leave the persistent table for Phase 7+ when there's a concrete second caller to justify it. Confirm or push back.
+**Q4 — Reopen authority + reason capture. RESOLVED: staff-alone reopen, optional `reason` added.** No hotel-side "request reopen" UX in Phase 6. `ReopenCandidateListInputSchema` gains an optional free-text `reason` field; the audit event's `after` payload becomes `{ from_state, to_state, reason? }`. (§2, §3.1, §8.)
 
-**Q6 — Narrowing the existing hotel-admin UPDATE policy on `candidate_businesses`.** §1 proposes dropping and recreating `candidate_businesses_update_hotel_admin` to remove the `status='approved'` allowed transition (because list-level approval supersedes per-row 'approved'). The alternative is leaving the existing policy as defended dead surface. My preference: narrow — the dead surface invites confusion if a future commit accidentally re-uses it. Are you OK with the policy change?
+**Q5 — Google Places caching boundary. RESOLVED: agreed.** In-memory only for Phase 6; persistent cache table deferred. Note added that the rate limit and cache are best-effort **per Vercel function instance** — acceptable as a cost guard, not as a security boundary. Persistent rate-limiting and persistent caching are deferred together. (§3.2, §6.4.)
 
-**Q7 — Partners-side hotel route placement.** §5 proposes new partners-app routes under `/hotels/[id]/candidates`. The partners app currently has no `/hotels/[id]` route at all (only `/members`). Phase 6 introduces it; future hotel-side surfaces (design meeting view, contact form, print-change requests) will live as siblings. Sanity-check: are you OK with `/hotels/[id]/candidates` as the URL shape (consistent with admin), or would you prefer a flatter `/candidates?hotel=...`? I prefer the nested shape — it matches admin and supports a future per-hotel landing page.
+**Q6 — Narrowing the existing hotel-admin UPDATE policy. RESOLVED: agreed.** Drop and recreate the policy in the new migration. **pgTAP audit completed (§1):** specs 01, 02, 03, 04, 07, 08 do not exercise the `status='approved'` hotel-admin UPDATE path; no existing spec needs an edit. New spec 12 carries the full positive + negative coverage including an explicit assertion that `status='approved'` UPDATE by hotel admin is rejected.
+
+**Q7 — Partners-side hotel route placement. RESOLVED: agreed.** New routes under `apps/partners/app/(protected)/hotels/[id]/candidates/`. Future hotel-side surfaces (design meeting view, contact form, print-change requests) will live as siblings.
 
 ---
 
-End of plan. No code lands until you've reviewed with your chat-side reviewer and the Q1-Q7 answers are settled.
+## 13. Additional plan updates (review-round resolutions)
+
+Captured here so a future reader sees the full audit trail of the plan-review round's resolutions, alongside the §12 Q-answers.
+
+1. **Migration ordinal verified.** `packages/db/supabase/migrations/` currently contains 15 files. By PROJECT_LOG's "migration N" convention (Phase 3 called `partner_invite_tracking` "migration 14"), Phase 6's new migration is **migration 15**. The plan now uses "Migration 15" in §1 framing and §10 commit 1. The filename's timestamp prefix is Phase-6-era; the ordinal is shorthand for prose.
+
+2. **Audit event renaming.** `candidate_list_marked_ready_for_review_failed` → `candidate_list_mark_ready_for_review_failed` (verb-form failure name matching Phase 5's `hotel_admin_invite_failed` convention). The success event (`candidate_list_marked_ready_for_review`) stays past-tense per the locked pattern. (§8.)
+
+3. **`decided_by_user_id` column clarification.** Added an explicit subsection in §1 documenting the column's post-Phase-6 semantics: it remains reserved for the Phase 7+ Strictons-side `signed_to_placement` bookkeeping; Phase 6 code does not write or read it. `removed_by` carries the soft-delete signal cleanly without overloading `decided_*`. A `COMMENT ON COLUMN` is added in the migration so future readers don't re-purpose the column accidentally.
+
+4. **Draft PR opens at commit 1.** Codified explicitly in §10. Subsequent commits push to the same PR. If CLAUDE.md needs updates during implementation (vendor-secret env var convention, in-memory cache pattern, etc.), they ride on the same Phase 6 PR — no standalone CLAUDE.md commit.
+
+5. **Actions-test coverage for the `duplicate_place` error path.** Explicitly listed in §9.2 — `addCandidateFromGooglePlaces` action test asserts that a Postgres 23505 from the partial unique index maps to `fieldErrors.placeId` and audits `candidate_add_failed` with `reason: 'duplicate_place'`. (The constraint is exercised at pgTAP level; the action's error-mapping is exercised here.)
+
+---
+
+End of plan. Plan-review round complete; all Q1-Q7 and additional update items are reflected above. The next round begins with commit 1 (migration 15 + pgTAP spec 12 + type regen + opens the draft PR), pending your "go".
