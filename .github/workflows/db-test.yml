@@ -74,10 +74,49 @@ jobs:
           fi
 
       - name: Run pgTAP suites
+        id: run-pgtap
         working-directory: packages/db
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
         run: pnpm db:test
+
+      # Diagnostic-only step. Phase 6 commit b83c0f7 hit a spec-12 failure
+      # whose cause isn't fetchable from sandboxes without authenticated
+      # GitHub API access. On the next failure, re-run spec 12 alone with
+      # psql --echo-all and ON_ERROR_STOP=0 so every statement + its error
+      # is preserved in the step output, and surface failing-assertion lines
+      # as `::warning::` annotations so the run-summary page exposes them
+      # to the WebFetch path.
+      #
+      # Scoped to spec 12 only by design (the other 11 specs aren't producing
+      # the regression we're chasing). REVERT after the spec-12 failure is
+      # diagnosed.
+      - name: Diagnostic — verbose spec 12 re-run on pgTAP failure
+        if: failure() && steps.run-pgtap.conclusion == 'failure'
+        working-directory: packages/db
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          set +e
+          mkdir -p /tmp/diag
+          # Helpers may have been left in place by the main step; re-applying
+          # is harmless (CREATE OR REPLACE / IF NOT EXISTS shapes).
+          psql -X -q -v ON_ERROR_STOP=0 "$SUPABASE_DB_URL" \
+            -f tests/_setup.sql > /tmp/diag/setup.out 2>&1
+          psql -X -q -v ON_ERROR_STOP=0 "$SUPABASE_DB_URL" \
+            -f tests/_helpers.sql > /tmp/diag/helpers.out 2>&1
+          # Verbose re-run of spec 12 only.
+          psql -X --echo-all -v ON_ERROR_STOP=0 "$SUPABASE_DB_URL" \
+            -f tests/12_candidate_lists.spec.sql > /tmp/diag/spec12.out 2>&1
+          echo "----- spec 12 verbose output (first 4000 lines) -----"
+          head -n 4000 /tmp/diag/spec12.out
+          echo "----- end spec 12 verbose output -----"
+          # Surface failing-assertion + error lines as run-summary annotations
+          # so they're visible without authenticated log access.
+          grep -nE "^not ok|^# Failed test|^# +got|^# +expected|^ERROR:|^psql:.*: ERROR|^FATAL:" \
+            /tmp/diag/spec12.out | while IFS= read -r line; do
+            echo "::warning::spec12 diag: ${line}"
+          done
 
       - name: Stop local Supabase
         if: always()
