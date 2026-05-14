@@ -721,7 +721,7 @@ Things that belong on your task list, not mine, before the corresponding commits
 | Before commit 6 | **Confirm env var name `GOOGLE_PLACES_API_KEY`** (or supply alternative). Add to `apps/admin/.env.example` after confirmation. |
 | Before commit 6 | **Add `GOOGLE_PLACES_API_KEY` to Vercel for the admin project only** (per Phase 4's hybrid env-var convention — app-specific, not team-shared, because partners doesn't use it). All three environments (Development, Preview, Production). |
 | Before commit 6 | **Add `GOOGLE_PLACES_API_KEY` as a GitHub Actions secret** for the e2e-admin workflow — though the workflow will mock the upstream by default (no real Google calls in CI). The secret is there so the live Vercel preview can be exercised manually during verification. |
-| Before commit 1 lands to dev | **Apply migration 16 to `strictons-dev` manually** via the auto-deploy workflow on push-to-main, OR via SQL Editor + `notify pgrst, 'reload schema'` if the feature branch needs it for in-branch verification (Phase 3 gotcha #1). |
+| Before commit 1 lands to dev | **Apply migration 15 to `strictons-dev` manually** via the auto-deploy workflow on push-to-main, OR via SQL Editor + `notify pgrst, 'reload schema'` if the feature branch needs it for in-branch verification (Phase 3 gotcha #1). |
 | Before Phase 6 verification | **No prod Supabase work needed** — `strictons-prod` provisioning is still deferred (Phase 4 "what's deferred"). Phase 6 ships against dev only. |
 | End of phase | **Manual verification on the Vercel preview** of the cross-app loop with a real Google Places response (with the real API key set on the preview). |
 
