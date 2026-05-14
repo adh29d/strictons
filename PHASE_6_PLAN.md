@@ -14,11 +14,11 @@ Two structural notes on the locked scope before the plan proper:
 
 The locked decision item 6 says "the exact state column placement (on `hotels`, on a new `candidate_lists` row, or inline) is YOUR design call." After re-reading `20260504100000_baseline.sql` lines 33-83 and `20260504100200_hotels.sql` lines 18-24, my call is **none of those three** — the existing `hotels.approval_state` enum and its associated due-date columns already model exactly this lifecycle:
 
-| Phase 6 lifecycle name | Existing `hotel_approval_state` value |
-|---|---|
-| `building` (staff researching) | `candidate_list_drafted` |
-| `ready_for_review` (hotel can see + edit) | `candidate_list_with_hotel` |
-| `approved` (hotel locked in) | `candidate_list_approved` |
+| Phase 6 lifecycle name                    | Existing `hotel_approval_state` value |
+| ----------------------------------------- | ------------------------------------- |
+| `building` (staff researching)            | `candidate_list_drafted`              |
+| `ready_for_review` (hotel can see + edit) | `candidate_list_with_hotel`           |
+| `approved` (hotel locked in)              | `candidate_list_approved`             |
 
 Plus `paused_awaiting_hotel_response` already covers the 14-day no-response case (baseline lines 44-48). The transition `candidate_list_drafted → candidate_list_with_hotel` is documented as "sets `candidate_list_approval_due_at = now() + 14 days`" — exactly the staff "mark ready for review" action. The transition `candidate_list_with_hotel → candidate_list_approved` is documented as "hotel_admin action via portal" — exactly the hotel approve action. Baseline line 70 spells out the design-meeting-held → candidate_list_drafted entry edge.
 
@@ -236,7 +236,11 @@ import { z } from 'zod';
 // Mirror DB enums for literal-array exhaustiveness checks in consumers.
 export const CANDIDATE_SOURCES = ['google_places', 'csv', 'manual'] as const;
 export const CANDIDATE_STATUSES = [
-  'proposed', 'approved', 'removed_by_hotel', 'removed_by_strictons', 'signed_to_placement',
+  'proposed',
+  'approved',
+  'removed_by_hotel',
+  'removed_by_strictons',
+  'signed_to_placement',
 ] as const;
 export type CandidateSource = (typeof CANDIDATE_SOURCES)[number];
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
@@ -359,7 +363,7 @@ All actions: gated by `requireStaff()` (admin-lib helper from Phase 5); wrapped 
 | Validates | `RemoveCandidateInputSchema` |
 | Update shape | Service-role UPDATE: `{ removed_at: now(), removed_by: staffUserId, removal_reason: reason ?? null, status: 'removed_by_strictons' }` |
 
-*Note on `status` for staff-side removal (Q3 — resolved):* a new `removed_by_strictons` value is appended to `public.candidate_status` in the §1 migration. Staff-side removals set `status='removed_by_strictons'`; hotel-side removals continue to set `status='removed_by_hotel'`. The append is safe (enum-append is the canonical Postgres pattern). The `removed_at` + `removed_by` columns remain the canonical "is removed" filter; the status value carries the actor-class signal cleanly without overloading the hotel-only value.
+_Note on `status` for staff-side removal (Q3 — resolved):_ a new `removed_by_strictons` value is appended to `public.candidate_status` in the §1 migration. Staff-side removals set `status='removed_by_strictons'`; hotel-side removals continue to set `status='removed_by_hotel'`. The append is safe (enum-append is the canonical Postgres pattern). The `removed_at` + `removed_by` columns remain the canonical "is removed" filter; the status value carries the actor-class signal cleanly without overloading the hotel-only value.
 
 | Returns success | `{ ok: true, message: 'Candidate removed.' }` |
 | Audit | `candidate_removed`, `actor_role='strictons_staff'`, `after={ reason, removed_at, status: 'removed_by_strictons' }` |
@@ -477,8 +481,8 @@ export type PlaceResult = {
   formattedAddress?: string;
   primaryType?: string;
   location?: { lat: number; lng: number };
-  phone?: string;        // formatted; from Place Details only
-  websiteUri?: string;   // from Place Details only
+  phone?: string; // formatted; from Place Details only
+  websiteUri?: string; // from Place Details only
 };
 
 export async function searchPlacesText(query: string): Promise<PlaceResult[]>;
@@ -488,6 +492,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult>;
 ### 6.2 Library choice — raw `fetch`, not the `@googlemaps/places` SDK
 
 Reasons:
+
 - The SDK is heavy (~200 KB transitive), targets browser + Node, and adds an OAuth2 path we don't use (API-key-only).
 - Two endpoints used (text search + details); the request bodies are small JSON, the response field masks are explicit; raw fetch is ~30 lines.
 - Avoids a new vendor SDK in `package.json` whose semantic shape we'd then have to mock in tests. Raw fetch is trivially mockable via `vi.spyOn(globalThis, 'fetch')`.
@@ -504,6 +509,7 @@ Reasons:
   - This call returns the contact + website fields we need at add time. They're in the "Contact" pricing tier, not the more expensive "Atmosphere" tier.
 
 Pricing reference (Phase 6 cost-bounding):
+
 - Text Search (Essentials + Pro fields): ~$0.025 / request after free
 - Place Details (Essentials + Contact): ~$0.020 / request after free
 - $200 monthly free credit → up to ~8,000 searches + details combined before charges
@@ -539,33 +545,36 @@ Provisioning is an operational task on you (see §11). Until the secret is set i
 **Server Action.** The file lives in `FormData` as a `File`; the action reads `await file.text()`, runs it through papaparse, validates each row with `CsvRowSchema`, and inserts the valid rows in a single batch. No Route Handler.
 
 Reasons over Route Handler:
+
 - Server Actions natively integrate with `useActionState` for the per-row error UI; a Route Handler would force the client to manage the state by hand.
 - File size is constrained (1 MB / 500 rows) — fits comfortably in the Server Action body-size budget without us extending Next's defaults.
 - One transport for all admin candidate-list mutations (no API-vs-action boundary inside the same feature).
 
 Reasons over client-side parsing:
+
 - Trust boundary: the server is the validation authority. Client parsing would still need server validation. Doing it twice is redundant.
 - One implementation to test.
 
 ### 7.2 Column contract (case-insensitive headers, trim on read)
 
-**Header normalisation (Q2 note):** papaparse does NOT lowercase or trim header names by default — it returns them verbatim from the CSV. Phase 6 normalises headers to `header.trim().toLowerCase()` before per-row validation, so spreadsheets that export with `Name`, ` website `, `Contact_Email` etc. land on the right schema fields. The CSV-parser helper does this header rewrite as the first step after parse, and the unit tests in §9.2 explicitly cover capitalised + whitespace-padded header variants.
+**Header normalisation (Q2 note):** papaparse does NOT lowercase or trim header names by default — it returns them verbatim from the CSV. Phase 6 normalises headers to `header.trim().toLowerCase()` before per-row validation, so spreadsheets that export with `Name`, `website`, `Contact_Email` etc. land on the right schema fields. The CSV-parser helper does this header rewrite as the first step after parse, and the unit tests in §9.2 explicitly cover capitalised + whitespace-padded header variants.
 
-| Column | Required | Notes |
-|---|---|---|
-| `name` | required | Non-empty after trim. Header missing → fatal parse error before per-row work. |
-| `address` | optional | Trimmed to 500 chars max. |
-| `category` | optional | Free text; 120 chars max. |
-| `phone` | optional | Free text; 60 chars max. No format validation. |
-| `website` | optional | Validated as URL; rejected per-row if not parseable. |
-| `contact_email` | optional | Validated as email; rejected per-row if not parseable. |
-| `distance_m` | optional | Coerced to non-negative integer; rejected per-row if not. |
+| Column          | Required | Notes                                                                         |
+| --------------- | -------- | ----------------------------------------------------------------------------- |
+| `name`          | required | Non-empty after trim. Header missing → fatal parse error before per-row work. |
+| `address`       | optional | Trimmed to 500 chars max.                                                     |
+| `category`      | optional | Free text; 120 chars max.                                                     |
+| `phone`         | optional | Free text; 60 chars max. No format validation.                                |
+| `website`       | optional | Validated as URL; rejected per-row if not parseable.                          |
+| `contact_email` | optional | Validated as email; rejected per-row if not parseable.                        |
+| `distance_m`    | optional | Coerced to non-negative integer; rejected per-row if not.                     |
 
 Extra columns ignored silently (forwards-compat with future-Phase columns).
 
 ### 7.3 Library — `papaparse`
 
 New dep request. Reasoning:
+
 - The CSV spec has edge cases (quoted fields with embedded commas / newlines, BOM handling, line-ending variations) that a hand-rolled split gets wrong on real-world spreadsheet exports. Two staff users uploading an Excel-exported CSV with a description containing a comma would surface the gap immediately.
 - papaparse is well-maintained, tree-shakes (we use only the synchronous string-parse path), and is small (~13 KB). The library has been around > 10 years.
 - No alternative is materially lighter. `csv-parse` is comparable; `papaparse` is the marginally more conventional pick. Confirm in Q5.
@@ -588,25 +597,26 @@ None. The file is processed in-memory inside the Server Action. No Supabase Stor
 
 Per Phase 5's frozen-event-name discipline, all new event names below. Existing actions (`hotel_admin_invite_*`, `portal_access_link_*`) are unchanged.
 
-| `action` string | `actor_role` | When |
-|---|---|---|
-| `candidate_added` | `strictons_staff` | Successful add via manual or Google Places (staff-side). `after` includes `source` and identifying fields (name, google_place_id where relevant). |
-| `candidate_added` | `hotel_admin` | Successful add via manual (hotel-side). Same shape; `actor_role` disambiguates. |
-| `candidate_add_failed` | `strictons_staff` \| `hotel_admin` | Failed add. `after.reason` ∈ `{validation_failed, hotel_not_found, place_not_found, places_api_failed, duplicate_place, insert_failed, list_not_editable}` |
-| `candidate_csv_imported` | `strictons_staff` | Successful CSV import. `after = { imported, rejected }` counts. |
-| `candidate_csv_import_failed` | `strictons_staff` | Failed CSV import. `after.reason` ∈ `{validation_failed, oversized, too_many_rows, missing_name_column, parse_failed, insert_failed}` |
-| `candidate_removed` | `strictons_staff` \| `hotel_admin` | Successful soft-delete. `after = { reason, removed_at, status }` — `status` is `'removed_by_strictons'` for staff removals (Q3), `'removed_by_hotel'` for hotel removals. |
-| `candidate_remove_failed` | `strictons_staff` \| `hotel_admin` | Failed soft-delete. `after.reason` ∈ `{not_found, cross_hotel_smuggling, already_removed, list_not_editable, update_failed}` |
-| `candidate_list_marked_ready_for_review` | `strictons_staff` | Successful transition `drafted → with_hotel`. `after = { candidate_list_approval_due_at }` |
-| `candidate_list_mark_ready_for_review_failed` | `strictons_staff` | Failure. `after.reason` ∈ `{wrong_state, update_failed}`. **Verb-form on failure, matching Phase 5's `hotel_admin_invite_failed` convention.** Past-tense success name + verb-form failure name is the locked pattern. |
-| `candidate_list_approved` | `hotel_admin` | Successful transition `with_hotel → approved`. `after = { approved_at }` |
-| `candidate_list_approve_failed` | `hotel_admin` | Failure. `after.reason` ∈ `{wrong_state, update_failed}` |
-| `candidate_list_reopened` | `strictons_staff` | Successful staff reopen. `after = { from_state, to_state, reason }` — `reason` present when supplied via the Q4 optional input, else `null` or absent. |
-| `candidate_list_reopen_failed` | `strictons_staff` | Failure. `after.reason` ∈ `{wrong_state, invalid_target_state, update_failed}` |
+| `action` string                               | `actor_role`                       | When                                                                                                                                                                                                                   |
+| --------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `candidate_added`                             | `strictons_staff`                  | Successful add via manual or Google Places (staff-side). `after` includes `source` and identifying fields (name, google_place_id where relevant).                                                                      |
+| `candidate_added`                             | `hotel_admin`                      | Successful add via manual (hotel-side). Same shape; `actor_role` disambiguates.                                                                                                                                        |
+| `candidate_add_failed`                        | `strictons_staff` \| `hotel_admin` | Failed add. `after.reason` ∈ `{validation_failed, hotel_not_found, place_not_found, places_api_failed, duplicate_place, insert_failed, list_not_editable}`                                                             |
+| `candidate_csv_imported`                      | `strictons_staff`                  | Successful CSV import. `after = { imported, rejected }` counts.                                                                                                                                                        |
+| `candidate_csv_import_failed`                 | `strictons_staff`                  | Failed CSV import. `after.reason` ∈ `{validation_failed, oversized, too_many_rows, missing_name_column, parse_failed, insert_failed}`                                                                                  |
+| `candidate_removed`                           | `strictons_staff` \| `hotel_admin` | Successful soft-delete. `after = { reason, removed_at, status }` — `status` is `'removed_by_strictons'` for staff removals (Q3), `'removed_by_hotel'` for hotel removals.                                              |
+| `candidate_remove_failed`                     | `strictons_staff` \| `hotel_admin` | Failed soft-delete. `after.reason` ∈ `{not_found, cross_hotel_smuggling, already_removed, list_not_editable, update_failed}`                                                                                           |
+| `candidate_list_marked_ready_for_review`      | `strictons_staff`                  | Successful transition `drafted → with_hotel`. `after = { candidate_list_approval_due_at }`                                                                                                                             |
+| `candidate_list_mark_ready_for_review_failed` | `strictons_staff`                  | Failure. `after.reason` ∈ `{wrong_state, update_failed}`. **Verb-form on failure, matching Phase 5's `hotel_admin_invite_failed` convention.** Past-tense success name + verb-form failure name is the locked pattern. |
+| `candidate_list_approved`                     | `hotel_admin`                      | Successful transition `with_hotel → approved`. `after = { approved_at }`                                                                                                                                               |
+| `candidate_list_approve_failed`               | `hotel_admin`                      | Failure. `after.reason` ∈ `{wrong_state, update_failed}`                                                                                                                                                               |
+| `candidate_list_reopened`                     | `strictons_staff`                  | Successful staff reopen. `after = { from_state, to_state, reason }` — `reason` present when supplied via the Q4 optional input, else `null` or absent.                                                                 |
+| `candidate_list_reopen_failed`                | `strictons_staff`                  | Failure. `after.reason` ∈ `{wrong_state, invalid_target_state, update_failed}`                                                                                                                                         |
 
 `entity_type` for candidate row actions: `'candidate_businesses'`. For list-state actions: `'hotels'` with `entity_id = hotelId`. All entries carry `entity_hotel_id = hotelId` for the per-hotel audit-scope index to do its job.
 
 Naming considerations:
+
 - Plain `candidate_added` (not `candidate_invited` / `candidate_proposed`) — to keep the language consistent with the UI verbs ("Add"). The `source` field disambiguates origin.
 - `candidate_list_marked_ready_for_review` is verbose but unambiguous; preferred over `candidate_list_ready_for_review` (which reads as "the list is now ready", not "an actor marked it ready").
 - Failure event names suffix `_failed` consistently with Phase 5's `hotel_admin_invite_failed` / `portal_access_link_resend_failed` pattern.
@@ -618,6 +628,7 @@ Naming considerations:
 ### 9.1 pgTAP — new spec `tests/12_candidate_lists.spec.sql`
 
 Coverage:
+
 - Hotel admin can INSERT a row with `source='manual'`, `proposed_by=auth.uid()`, `status='proposed'`, into their own hotel. Asserts success.
 - Hotel admin CANNOT INSERT with `source='csv'` or `source='google_places'`. Asserts policy violation.
 - Hotel admin CANNOT INSERT into another hotel. Asserts policy violation.
@@ -715,15 +726,15 @@ Expected total: ~12 commits. The first three can land quickly; commits 5-7 are t
 
 Things that belong on your task list, not mine, before the corresponding commits can land or verify:
 
-| When | Task |
-|---|---|
-| Before commit 6 | **Provision Google Cloud project + enable Places API (New).** Create project (or reuse existing); enable Places API (New); create an API key restricted by HTTP referrer (server-side only — we can lock to Vercel egress IPs or just leave key-restricted since it never leaves the server). |
-| Before commit 6 | **Confirm env var name `GOOGLE_PLACES_API_KEY`** (or supply alternative). Add to `apps/admin/.env.example` after confirmation. |
-| Before commit 6 | **Add `GOOGLE_PLACES_API_KEY` to Vercel for the admin project only** (per Phase 4's hybrid env-var convention — app-specific, not team-shared, because partners doesn't use it). All three environments (Development, Preview, Production). |
-| Before commit 6 | **Add `GOOGLE_PLACES_API_KEY` as a GitHub Actions secret** for the e2e-admin workflow — though the workflow will mock the upstream by default (no real Google calls in CI). The secret is there so the live Vercel preview can be exercised manually during verification. |
-| Before commit 1 lands to dev | **Apply migration 15 to `strictons-dev` manually** via the auto-deploy workflow on push-to-main, OR via SQL Editor + `notify pgrst, 'reload schema'` if the feature branch needs it for in-branch verification (Phase 3 gotcha #1). |
-| Before Phase 6 verification | **No prod Supabase work needed** — `strictons-prod` provisioning is still deferred (Phase 4 "what's deferred"). Phase 6 ships against dev only. |
-| End of phase | **Manual verification on the Vercel preview** of the cross-app loop with a real Google Places response (with the real API key set on the preview). |
+| When                         | Task                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before commit 6              | **Provision Google Cloud project + enable Places API (New).** Create project (or reuse existing); enable Places API (New); create an API key restricted by HTTP referrer (server-side only — we can lock to Vercel egress IPs or just leave key-restricted since it never leaves the server). |
+| Before commit 6              | **Confirm env var name `GOOGLE_PLACES_API_KEY`** (or supply alternative). Add to `apps/admin/.env.example` after confirmation.                                                                                                                                                                |
+| Before commit 6              | **Add `GOOGLE_PLACES_API_KEY` to Vercel for the admin project only** (per Phase 4's hybrid env-var convention — app-specific, not team-shared, because partners doesn't use it). All three environments (Development, Preview, Production).                                                   |
+| Before commit 6              | **Add `GOOGLE_PLACES_API_KEY` as a GitHub Actions secret** for the e2e-admin workflow — though the workflow will mock the upstream by default (no real Google calls in CI). The secret is there so the live Vercel preview can be exercised manually during verification.                     |
+| Before commit 1 lands to dev | **Apply migration 15 to `strictons-dev` manually** via the auto-deploy workflow on push-to-main, OR via SQL Editor + `notify pgrst, 'reload schema'` if the feature branch needs it for in-branch verification (Phase 3 gotcha #1).                                                           |
+| Before Phase 6 verification  | **No prod Supabase work needed** — `strictons-prod` provisioning is still deferred (Phase 4 "what's deferred"). Phase 6 ships against dev only.                                                                                                                                               |
+| End of phase                 | **Manual verification on the Vercel preview** of the cross-app loop with a real Google Places response (with the real API key set on the preview).                                                                                                                                            |
 
 No new GitHub repo-level secrets beyond the Places API key. No new email-template secrets (no new email is sent in Phase 6). No new database connection strings.
 
