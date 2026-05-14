@@ -6,6 +6,7 @@ const createServiceRoleClientMock = vi.fn();
 const writeAuditLogMock = vi.fn();
 const revalidatePathMock = vi.fn();
 const requireStaffMock = vi.fn();
+const getPlaceDetailsMock = vi.fn();
 
 vi.mock('@strictons/db/client', () => ({
   createServiceRoleClient: () => createServiceRoleClientMock(),
@@ -19,6 +20,16 @@ vi.mock('next/cache', () => ({
 vi.mock('@/lib/require-staff', () => ({
   requireStaff: () => requireStaffMock(),
 }));
+// getPlaceDetails is mocked; the PlacesConfigError / PlacesUpstreamError
+// classes are kept REAL via importActual so `instanceof` holds inside
+// addCandidateFromGooglePlaces (the Phase 5 EmailSendError pattern).
+vi.mock('@/lib/google-places', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/google-places')>('@/lib/google-places');
+  return {
+    ...actual,
+    getPlaceDetails: (...args: unknown[]) => getPlaceDetailsMock(...args),
+  };
+});
 
 // ---- Constants -----------------------------------------------------------
 
@@ -28,6 +39,7 @@ const HOTEL_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OTHER_HOTEL_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const CANDIDATE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const NEW_CANDIDATE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const PLACE_ID = 'ChIJ_beachside_cafe';
 
 type ChainResponse = { data: unknown; error: unknown };
 
@@ -175,6 +187,30 @@ function makeReopenFormData(
   return fd;
 }
 
+function makeGooglePlacesFormData(
+  opts: { hotelId?: string; placeId?: string; category?: string } = {},
+): FormData {
+  const fd = new FormData();
+  fd.set('hotelId', opts.hotelId ?? HOTEL_ID);
+  fd.set('placeId', opts.placeId ?? PLACE_ID);
+  if (opts.category !== undefined) fd.set('category', opts.category);
+  return fd;
+}
+
+/** A Place Details result as the commit-3 adapter would return it. */
+function makePlaceResult(overrides: Record<string, unknown> = {}) {
+  return {
+    placeId: PLACE_ID,
+    name: 'Beachside Cafe',
+    formattedAddress: '1 Beach Rd, Sydney NSW',
+    primaryType: 'cafe',
+    location: { lat: -33.8, lng: 151.2 },
+    phone: '(02) 1234 5678',
+    websiteUri: 'https://beachside.example',
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.resetModules();
   createServiceRoleClientMock.mockReset();
@@ -182,6 +218,7 @@ beforeEach(() => {
   writeAuditLogMock.mockResolvedValue(undefined);
   revalidatePathMock.mockReset();
   requireStaffMock.mockReset();
+  getPlaceDetailsMock.mockReset();
   requireStaffMock.mockResolvedValue({
     kind: 'ok',
     userId: STAFF_USER_ID,
@@ -767,6 +804,223 @@ describe('reopenCandidateList', () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
     expect(auditEntry('candidate_list_reopen_failed')).toMatchObject({
       after: { reason: 'update_failed', message: 'update boom' },
+    });
+  });
+});
+
+// ===========================================================================
+// addCandidateFromGooglePlaces
+// ===========================================================================
+
+describe('addCandidateFromGooglePlaces', () => {
+  it('happy path — fetches Place Details, INSERTs source=google_places, audits, revalidates', async () => {
+    const { client, captured } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult());
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state).toEqual({
+      ok: true,
+      message: 'Candidate added.',
+      candidateId: NEW_CANDIDATE_ID,
+    });
+
+    // Place Details fetched directly via the adapter — no Route Handler hop.
+    expect(getPlaceDetailsMock).toHaveBeenCalledWith(PLACE_ID);
+
+    expect(captured.candidateInsert).toHaveLength(1);
+    expect(captured.candidateInsert[0]).toEqual({
+      hotel_id: HOTEL_ID,
+      source: 'google_places',
+      google_place_id: PLACE_ID,
+      name: 'Beachside Cafe',
+      address: '1 Beach Rd, Sydney NSW',
+      category: 'cafe', // derived from primaryType (no override)
+      distance_m: null, // always null for a Google Places add
+      phone: '(02) 1234 5678',
+      website: 'https://beachside.example',
+      proposed_by: STAFF_USER_ID,
+      status: 'proposed',
+    });
+
+    expect(revalidatePathMock).toHaveBeenCalledWith('/hotels/[id]');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/hotels/[id]/candidates');
+
+    expect(auditEntry('candidate_added')).toMatchObject({
+      actor_role: 'strictons_staff',
+      entity_type: 'candidate_businesses',
+      entity_id: NEW_CANDIDATE_ID,
+      entity_hotel_id: HOTEL_ID,
+      after: { source: 'google_places', name: 'Beachside Cafe', google_place_id: PLACE_ID },
+    });
+  });
+
+  it('uses the category override when supplied (wins over primaryType)', async () => {
+    const { client, captured } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult({ primaryType: 'cafe' }));
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData({ category: 'restaurant' }));
+
+    expect((captured.candidateInsert[0] as Record<string, unknown>).category).toBe('restaurant');
+  });
+
+  it('derives category from primaryType when no override; null when neither is present', async () => {
+    const first = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(first.client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult({ primaryType: 'bar' }));
+
+    let actions = await import('./actions');
+    await actions.addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+    expect((first.captured.candidateInsert[0] as Record<string, unknown>).category).toBe('bar');
+
+    // Fresh module + client; Place Details with no primaryType → category null.
+    vi.resetModules();
+    const second = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(second.client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult({ primaryType: undefined }));
+    actions = await import('./actions');
+    await actions.addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+    expect((second.captured.candidateInsert[0] as Record<string, unknown>).category).toBeNull();
+  });
+
+  it('rejects when caller is not staff (no service client, no adapter call, no audit)', async () => {
+    requireStaffMock.mockResolvedValue({ kind: 'error', error: 'Not signed in.' });
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state).toEqual({ error: 'Not signed in.' });
+    expect(createServiceRoleClientMock).not.toHaveBeenCalled();
+    expect(getPlaceDetailsMock).not.toHaveBeenCalled();
+    expect(writeAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it('audits validation_failed for a missing placeId, before any adapter call', async () => {
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData({ placeId: '' }));
+
+    expect(state.error).toBe('Please fix the errors below.');
+    expect(state.fieldErrors?.placeId).toBeDefined();
+    expect(createServiceRoleClientMock).not.toHaveBeenCalled();
+    expect(getPlaceDetailsMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'validation_failed' },
+    });
+  });
+
+  it('audits hotel_not_found and does NOT call the adapter when the hotel SELECT returns no row', async () => {
+    const { client } = makeServiceClient({ hotelLookup: { data: null, error: null } });
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state).toEqual({ error: 'Hotel not found.' });
+    // The hotel SELECT runs before the Google call to spare the API budget.
+    expect(getPlaceDetailsMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'hotel_not_found' },
+    });
+  });
+
+  it('maps PlacesConfigError to audit reason missing_api_key', async () => {
+    const { client } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { PlacesConfigError } = await import('@/lib/google-places');
+    getPlaceDetailsMock.mockRejectedValue(
+      new PlacesConfigError('GOOGLE_PLACES_API_KEY is not set.'),
+    );
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state.error).toMatch(/not configured/i);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'missing_api_key' },
+    });
+  });
+
+  it('maps a 404 PlacesUpstreamError to audit reason place_not_found', async () => {
+    const { client } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { PlacesUpstreamError } = await import('@/lib/google-places');
+    getPlaceDetailsMock.mockRejectedValue(
+      new PlacesUpstreamError('Google Places API error: place not found', 404),
+    );
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state.error).toMatch(/could not be found/i);
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'place_not_found' },
+    });
+  });
+
+  it('maps a non-404 PlacesUpstreamError to audit reason places_api_failed', async () => {
+    const { client } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { PlacesUpstreamError } = await import('@/lib/google-places');
+    getPlaceDetailsMock.mockRejectedValue(
+      new PlacesUpstreamError('Google Places request timed out after 8000ms.'),
+    );
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state.error).toMatch(/could not reach google places/i);
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'places_api_failed' },
+    });
+  });
+
+  it('maps a Postgres 23505 unique violation to duplicate_place + fieldErrors.placeId', async () => {
+    const { client } = makeServiceClient({
+      candidateInsert: {
+        data: null,
+        error: {
+          code: '23505',
+          message:
+            'duplicate key value violates unique constraint "candidate_businesses_hotel_place_alive_uidx"',
+        },
+      },
+    });
+    createServiceRoleClientMock.mockReturnValue(client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult());
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state.ok).toBeUndefined();
+    expect(state.fieldErrors?.placeId).toContain('already on the candidate list');
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'duplicate_place', google_place_id: PLACE_ID },
+    });
+  });
+
+  it('audits insert_failed for a non-23505 INSERT error', async () => {
+    const { client } = makeServiceClient({
+      candidateInsert: { data: null, error: { code: '23502', message: 'insert boom' } },
+    });
+    createServiceRoleClientMock.mockReturnValue(client);
+    getPlaceDetailsMock.mockResolvedValue(makePlaceResult());
+
+    const { addCandidateFromGooglePlaces } = await import('./actions');
+    const state = await addCandidateFromGooglePlaces({}, makeGooglePlacesFormData());
+
+    expect(state).toEqual({ error: 'Could not add candidate. Please try again.' });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_add_failed')).toMatchObject({
+      after: { reason: 'insert_failed', message: 'insert boom' },
     });
   });
 });

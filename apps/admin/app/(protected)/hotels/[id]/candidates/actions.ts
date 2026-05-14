@@ -5,25 +5,27 @@ import { withServerActionInstrumentation } from '@sentry/nextjs';
 import { createServiceRoleClient } from '@strictons/db/client';
 import { writeAuditLog } from '@strictons/db/audit';
 import {
+  AddFromGooglePlacesInputSchema,
   ManualCandidateInputSchema,
   MarkListReadyForReviewInputSchema,
   RemoveCandidateInputSchema,
   ReopenCandidateListInputSchema,
 } from '@strictons/types/candidates';
 import { requireStaff } from '@/lib/require-staff';
+import { getPlaceDetails, PlacesConfigError, PlacesUpstreamError } from '@/lib/google-places';
 import type { AddCandidateState, MarkReadyState, RemoveCandidateState, ReopenState } from './types';
 
 /**
  * Phase 6 admin-side candidate-list Server Actions (PHASE_6_PLAN.md
- * §3.1). This commit lands four of the six admin actions:
+ * §3.1). Five of the six admin actions now land here:
  *
- *   - addCandidateManualStaff
- *   - removeCandidateAsStaff
- *   - markCandidateListReadyForReview
- *   - reopenCandidateList
+ *   - addCandidateManualStaff       (commit 5)
+ *   - removeCandidateAsStaff        (commit 5)
+ *   - markCandidateListReadyForReview (commit 5)
+ *   - reopenCandidateList           (commit 5)
+ *   - addCandidateFromGooglePlaces  (commit 6)
  *
- * addCandidateFromGooglePlaces (commit 6) and uploadCandidateCsv
- * (commit 7) follow.
+ * uploadCandidateCsv (commit 7) follows.
  *
  * Conventions (Phase 4/5 locked):
  *
@@ -648,6 +650,206 @@ export async function reopenCandidateList(
 
       revalidateCandidateRoutes();
       return { ok: true, message: 'List reopened.' };
+    },
+  );
+}
+
+// ----------------------------------------------------------------------------
+// addCandidateFromGooglePlaces
+// ----------------------------------------------------------------------------
+
+export async function addCandidateFromGooglePlaces(
+  _prev: AddCandidateState,
+  formData: FormData,
+): Promise<AddCandidateState> {
+  return withServerActionInstrumentation(
+    'admin:addCandidateFromGooglePlaces',
+    async (): Promise<AddCandidateState> => {
+      const auth = await requireStaff();
+      if (auth.kind === 'error') {
+        return { error: auth.error };
+      }
+      const { userId: staffUserId } = auth;
+
+      const parsed = AddFromGooglePlacesInputSchema.safeParse({
+        hotelId: (formData.get('hotelId') ?? '').toString(),
+        placeId: (formData.get('placeId') ?? '').toString(),
+        category: optionalString(formData.get('category')),
+      });
+
+      if (!parsed.success) {
+        const summary = zodErrorSummary(parsed.error.issues);
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_add_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: null,
+          after: { reason: 'validation_failed', message: summary.message },
+        });
+        return { error: 'Please fix the errors below.', fieldErrors: summary.fieldErrors };
+      }
+
+      const input = parsed.data;
+      const service = createServiceRoleClient();
+
+      // ---- SELECT the hotel to confirm it exists ----
+      // Done before the Google call so a bad hotelId doesn't burn an API
+      // request against the $200 free-credit budget.
+      const { data: hotelRow, error: hotelLookupError } = await service
+        .from('hotels')
+        .select('id')
+        .eq('id', input.hotelId)
+        .maybeSingle();
+      if (hotelLookupError || !hotelRow) {
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_add_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: null,
+          after: {
+            reason: 'hotel_not_found',
+            message: hotelLookupError?.message ?? null,
+          },
+        });
+        return { error: 'Hotel not found.' };
+      }
+
+      // ---- Place Details via the commit-3 adapter ----
+      // The adapter is the single source of truth for fetch / cache /
+      // typed errors. The action does NOT consume the rate-limit bucket
+      // — that's the search Route Handler's job (§3.2). An ad-hoc
+      // add-by-placeId is gated by the staff user having already seen
+      // the search results, so it isn't a realistic abuse vector.
+      //
+      // PlacesConfigError (missing GOOGLE_PLACES_API_KEY) and
+      // PlacesUpstreamError (HTTP non-2xx / timeout / network) are the
+      // adapter's two typed errors. status === 404 → place_not_found;
+      // any other PlacesUpstreamError → places_api_failed. Anything else
+      // is genuinely unexpected — rethrow so Sentry captures it.
+      let placeDetails;
+      try {
+        placeDetails = await getPlaceDetails(input.placeId);
+      } catch (cause) {
+        if (cause instanceof PlacesConfigError) {
+          await writeAuditLog({
+            actor_user_id: staffUserId,
+            actor_role: 'strictons_staff',
+            action: 'candidate_add_failed',
+            entity_type: 'candidate_businesses',
+            entity_id: crypto.randomUUID(),
+            entity_hotel_id: input.hotelId,
+            after: { reason: 'missing_api_key', message: cause.message },
+          });
+          return {
+            error: 'Google Places is not configured. Please contact an administrator.',
+          };
+        }
+        if (cause instanceof PlacesUpstreamError) {
+          const reason = cause.status === 404 ? 'place_not_found' : 'places_api_failed';
+          await writeAuditLog({
+            actor_user_id: staffUserId,
+            actor_role: 'strictons_staff',
+            action: 'candidate_add_failed',
+            entity_type: 'candidate_businesses',
+            entity_id: crypto.randomUUID(),
+            entity_hotel_id: input.hotelId,
+            after: { reason, message: cause.message },
+          });
+          return {
+            error:
+              reason === 'place_not_found'
+                ? 'That place could not be found on Google Places.'
+                : 'Could not reach Google Places. Please try again.',
+          };
+        }
+        throw cause;
+      }
+
+      // ---- INSERT the candidate ----
+      // category: override wins, else derive from primaryType, else null.
+      // distance_m is always null for a Google Places add — no distance
+      // input, no distance in the v1 Places response, no hotel location
+      // to measure from (PHASE_6_PLAN.md §3.1).
+      const { data: inserted, error: insertError } = await service
+        .from('candidate_businesses')
+        .insert({
+          hotel_id: input.hotelId,
+          source: 'google_places',
+          google_place_id: input.placeId,
+          name: placeDetails.name,
+          address: placeDetails.formattedAddress ?? null,
+          category: input.category ?? placeDetails.primaryType ?? null,
+          distance_m: null,
+          phone: placeDetails.phone ?? null,
+          website: placeDetails.websiteUri ?? null,
+          proposed_by: staffUserId,
+          status: 'proposed',
+        })
+        .select('id')
+        .single();
+
+      if (insertError || !inserted) {
+        // Postgres 23505 from candidate_businesses_hotel_place_alive_uidx:
+        // this place is already on the hotel's live list. Surface as a
+        // per-field error on placeId per §3.1.
+        if (insertError?.code === '23505') {
+          await writeAuditLog({
+            actor_user_id: staffUserId,
+            actor_role: 'strictons_staff',
+            action: 'candidate_add_failed',
+            entity_type: 'candidate_businesses',
+            entity_id: crypto.randomUUID(),
+            entity_hotel_id: input.hotelId,
+            after: {
+              reason: 'duplicate_place',
+              message: insertError.message,
+              google_place_id: input.placeId,
+            },
+          });
+          return {
+            error: 'Please fix the errors below.',
+            fieldErrors: {
+              placeId: 'This place is already on the candidate list for this hotel.',
+            },
+          };
+        }
+
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_add_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: input.hotelId,
+          after: {
+            reason: 'insert_failed',
+            message: insertError?.message ?? 'unknown',
+          },
+        });
+        return { error: 'Could not add candidate. Please try again.' };
+      }
+
+      // ---- Success ----
+      await writeAuditLog({
+        actor_user_id: staffUserId,
+        actor_role: 'strictons_staff',
+        action: 'candidate_added',
+        entity_type: 'candidate_businesses',
+        entity_id: inserted.id,
+        entity_hotel_id: input.hotelId,
+        after: {
+          source: 'google_places',
+          name: placeDetails.name,
+          google_place_id: input.placeId,
+        },
+      });
+
+      revalidateCandidateRoutes();
+      return { ok: true, message: 'Candidate added.', candidateId: inserted.id };
     },
   );
 }
