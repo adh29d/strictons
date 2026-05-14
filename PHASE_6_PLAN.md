@@ -579,7 +579,7 @@ Reasons over client-side parsing:
 
 ### 7.2 Column contract (case-insensitive headers, trim on read)
 
-**Header normalisation (Q2 note):** papaparse does NOT lowercase or trim header names by default — it returns them verbatim from the CSV. Phase 6 normalises headers to `header.trim().toLowerCase()` before per-row validation, so spreadsheets that export with `Name`, `website`, `Contact_Email` etc. land on the right schema fields. The CSV-parser helper does this header rewrite as the first step after parse, and the unit tests in §9.2 explicitly cover capitalised + whitespace-padded header variants.
+**Header normalisation (Q2 note):** papaparse does NOT lowercase or trim header names by default — it returns them verbatim from the CSV. Phase 6 normalises headers to `header.trim().toLowerCase()` via papaparse's `transformHeader` option, which runs at parse time (so both `meta.fields` and every row object's keys come back normalised — cleaner than a post-parse key remap). Spreadsheets that export with `Name`, `website`, `Contact_Email` etc. land on the right schema fields. The unit tests in §9.2 explicitly cover capitalised + whitespace-padded header variants.
 
 | Column          | Required | Notes                                                                         |
 | --------------- | -------- | ----------------------------------------------------------------------------- |
@@ -592,6 +592,15 @@ Reasons over client-side parsing:
 | `distance_m`    | optional | Coerced to non-negative integer; rejected per-row if not.                     |
 
 Extra columns ignored silently (forwards-compat with future-Phase columns).
+
+**Empty-vs-header-only (both fatal, distinct messages).** The parser distinguishes two empty cases, each fatal (it refuses to return partial results):
+
+- A zero-byte / whitespace-only file → `"The CSV file is empty."`
+- A well-formed file with a header row but zero data rows → `"The CSV has no data rows."` Importing zero candidates is never a meaningful success; a header-only file is almost always the wrong file or a blank template.
+
+The other fatal cases: file larger than 1 MiB (checked pre-parse on the decoded string's UTF-8 byte length — equals the original file size for UTF-8 input — to bound memory), missing the required `name` column, and more than 500 data rows (checked post-parse on the real, non-empty row count). Everything else — per-row validation failures — is non-fatal: the parser returns both the valid `rows` and the `rejected` list, and the Server Action owns the partial-success semantics.
+
+**rowNumber semantics.** A rejection's `rowNumber` is the spreadsheet row the user sees in Excel: `dataIndex + 2` (+1 for 1-indexing, +1 for the header row). papaparse's `skipEmptyLines` is left OFF so every source line keeps its index; entirely-empty lines (a trailing newline, blank rows) are filtered out manually _after_ recording each surviving row's original index, so a mid-file blank line does not shift the rowNumbers of the rows below it.
 
 ### 7.3 Library — `papaparse`
 
@@ -676,7 +685,7 @@ Plus the existing test 21 in `01_unauth.spec.sql` (structural audit for orphan G
 
 - `packages/types/src/candidates.test.ts` — schema positive/negative cases.
 - `apps/admin/lib/google-places.test.ts` — `fetch` mocked; happy path (search + details mapping), 4xx error, 5xx error, non-JSON error body, timeout, `PlacesConfigError` on a missing `GOOGLE_PLACES_API_KEY` (asserts it's `PlacesConfigError`, not `PlacesUpstreamError`, and that no `fetch` is made), field-mask presence (both endpoints), cache hit, case/whitespace-insensitive cache key, cache miss, search-vs-details independent TTLs, TTL expiry, LRU eviction at the 500-entry cap, LRU read-promotes, per-user rate-limit buckets, rate-limit-bucket-overflow + window reset.
-- `apps/admin/lib/parse-candidates-csv.test.ts` — well-formed CSV; missing optional columns; missing required `name` column (fatal); quoted-comma fields; BOM-prefixed file; per-row validation failure mix; >500 rows (fatal); >1 MB (fatal); empty file.
+- `apps/admin/lib/parse-candidates-csv.test.ts` — well-formed CSV; missing optional columns; missing required `name` column (fatal); quoted-comma fields; BOM-prefixed file; extra columns ignored; header normalisation (capitalised / uppercase / whitespace-padded / mixed-case `name`, plus `Contact_Email` → `contact_email`); per-row validation failure mix with spreadsheet rowNumbers; mid-file blank line preserves rowNumber alignment; trailing newline produces no spurious rejection; >500 rows (fatal) and exactly-500 accepted; >1 MiB (fatal); empty file (fatal); header-only file (fatal — distinct `"no data rows"` message).
 - `apps/admin/app/(protected)/hotels/[id]/candidates/actions.test.ts` — every action, every branch (per Phase 5 pattern). `revalidatePath` mocked. `createServiceRoleClient` mocked. **Explicitly covers the `addCandidateFromGooglePlaces` Postgres 23505 → `duplicate_place` error-mapping branch** — i.e. when the partial unique index rejects the INSERT, the action returns `{ ok: false, fieldErrors: { placeId: '<message pointing at existing row>' } }` and audits `candidate_add_failed` with `reason: 'duplicate_place'`. (The constraint itself is tested at pgTAP level; the action's error-mapping is tested here.) Also covers the staff-removal status=`removed_by_strictons` write (Q3) and the reopen `reason` payload presence/absence (Q4).
 - `apps/admin/app/api/places/search/route.test.ts` — auth gate, rate limit, success, validation failure, upstream error.
 - `apps/partners/app/(protected)/hotels/[id]/candidates/actions.test.ts` — same coverage shape on the partners side.
