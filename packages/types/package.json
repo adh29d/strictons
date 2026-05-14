@@ -8,7 +8,8 @@
     "./invites": "./src/invites.ts",
     "./auth": "./src/auth.ts",
     "./hotels": "./src/hotels.ts",
-    "./hotel-admin-invites": "./src/hotel-admin-invites.ts"
+    "./hotel-admin-invites": "./src/hotel-admin-invites.ts",
+    "./candidates": "./src/candidates.ts"
   },
   "scripts": {
     "lint": "eslint .",
