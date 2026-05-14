@@ -188,21 +188,22 @@ test.describe('admin candidate-list UI', () => {
     ).toBeVisible();
 
     // ---- Mark ready for review → status changes -------------------------
+    // The deterministic post-action signal for a list-state transition is
+    // the page-header status badge, NOT the form's role="status" message:
+    // on a successful transition the action's revalidatePath flips
+    // hotels.approval_state, so ListStateControls swaps MarkReadyForm out
+    // for ReopenForm — MarkReadyForm's useActionState success message
+    // unmounts with it (it only flashes). The header badge re-renders via
+    // the same revalidate and persists, so the spec keys on that.
     const statusSection = page.locator('section', { hasText: 'List status' });
     await statusSection.getByRole('button', { name: 'Mark ready for hotel review' }).click();
-    await expect(
-      statusSection.getByRole('status').filter({ hasText: 'List ready for hotel review.' }),
-    ).toBeVisible();
     await expect(page.getByText('List status: With hotel for review')).toBeVisible();
 
     // ---- Reopen to drafted → status changes back ------------------------
     // After mark-ready the reopen control is rendered (state is
     // candidate_list_with_hotel); its target selector defaults to
-    // candidate_list_drafted.
+    // candidate_list_drafted. Same signal as above — the header badge.
     await statusSection.getByRole('button', { name: 'Reopen list' }).click();
-    await expect(
-      statusSection.getByRole('status').filter({ hasText: 'List reopened.' }),
-    ).toBeVisible();
     await expect(page.getByText('List status: Draft — staff building the list')).toBeVisible();
 
     // ---- DB assertions ---------------------------------------------------

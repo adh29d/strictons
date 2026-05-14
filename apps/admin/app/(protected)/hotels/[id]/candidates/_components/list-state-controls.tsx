@@ -27,10 +27,16 @@ type Props = {
  *   - any other state           → no actions (the candidate list is
  *                                 not in a staff-actionable phase)
  *
- * Each form is useActionState against its Server Action. The
- * role="status" success message is the deterministic post-action
- * signal; the page is force-dynamic so the action's revalidatePath
- * re-renders the page header's status badge.
+ * Each form is useActionState against its Server Action. Note the
+ * post-action signal asymmetry: on a SUCCESSFUL transition the action's
+ * revalidatePath flips hotels.approval_state, so this component swaps
+ * the form out (MarkReadyForm → ReopenForm, or ReopenForm re-renders
+ * with the new state) — the form's role="status" success message only
+ * flashes before it unmounts. The durable success signal is the page
+ * header's status badge, which re-renders via the same revalidate. The
+ * inline role="status" still matters for the no-change cases (a
+ * rejected transition leaves approval_state untouched, so the form
+ * stays mounted and state.error / a no-op message persists).
  */
 export function ListStateControls({ hotelId, approvalState }: Props): React.ReactElement {
   if (approvalState === 'candidate_list_drafted') {
