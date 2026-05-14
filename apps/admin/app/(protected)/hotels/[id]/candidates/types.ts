@@ -1,3 +1,5 @@
+import type { CsvRejection } from '@/lib/parse-candidates-csv';
+
 /**
  * Form state shapes for the Phase 6 admin-side candidate-list Server
  * Actions in ./actions.ts.
@@ -59,4 +61,28 @@ export type ReopenState = {
   ok?: true;
   error?: string;
   message?: string;
+};
+
+/**
+ * Result of uploadCandidateCsv.
+ *
+ * `rejected` carries the per-row validation failures from
+ * parseCandidatesCsv (rowNumber + error); the Client Component renders
+ * it as a list under the import summary. It is present on a partial
+ * ok:true result AND on an ok:false INSERT-batch failure (the parser's
+ * rejections still surface so the user can fix them). importedCount /
+ * rejectedCount are present on every ok:true result.
+ *
+ * A clean ok:true with importedCount:0 is a valid outcome — a CSV that
+ * parsed structurally fine but where every data row failed per-row
+ * validation (PHASE_6_PLAN.md §3.1; plan-review round). The action
+ * skips the batch INSERT in that case.
+ */
+export type UploadCsvState = {
+  ok?: true;
+  error?: string;
+  message?: string;
+  importedCount?: number;
+  rejectedCount?: number;
+  rejected?: CsvRejection[];
 };

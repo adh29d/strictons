@@ -5,6 +5,7 @@ import {
   CANDIDATE_SOURCES,
   CANDIDATE_STATUSES,
   CsvRowSchema,
+  CsvUploadInputSchema,
   GooglePlacesSearchInputSchema,
   ManualCandidateInputSchema,
   MarkListReadyForReviewInputSchema,
@@ -239,6 +240,20 @@ describe('CsvRowSchema', () => {
     });
     expect(result.contact_email).toBe('hello@cafemike.example');
     expect(result.distance_m).toBe(100);
+  });
+});
+
+describe('CsvUploadInputSchema', () => {
+  it('accepts a valid hotelId', () => {
+    expect(() => CsvUploadInputSchema.parse({ hotelId: HOTEL_ID })).not.toThrow();
+  });
+
+  it('rejects a malformed hotelId', () => {
+    expect(() => CsvUploadInputSchema.parse({ hotelId: 'not-a-uuid' })).toThrow();
+  });
+
+  it('rejects a missing hotelId', () => {
+    expect(() => CsvUploadInputSchema.parse({})).toThrow();
   });
 });
 

@@ -7,6 +7,7 @@ const writeAuditLogMock = vi.fn();
 const revalidatePathMock = vi.fn();
 const requireStaffMock = vi.fn();
 const getPlaceDetailsMock = vi.fn();
+const parseCandidatesCsvMock = vi.fn();
 
 vi.mock('@strictons/db/client', () => ({
   createServiceRoleClient: () => createServiceRoleClientMock(),
@@ -30,6 +31,13 @@ vi.mock('@/lib/google-places', async () => {
     getPlaceDetails: (...args: unknown[]) => getPlaceDetailsMock(...args),
   };
 });
+// parseCandidatesCsv is mocked at the apps/admin/lib boundary — the
+// parser is its own tested boundary (commit 4); uploadCandidateCsv's
+// tests control the parse result directly. papaparse is never mocked
+// here.
+vi.mock('@/lib/parse-candidates-csv', () => ({
+  parseCandidatesCsv: (...args: unknown[]) => parseCandidatesCsvMock(...args),
+}));
 
 // ---- Constants -----------------------------------------------------------
 
@@ -52,6 +60,7 @@ type ChainResponse = { data: unknown; error: unknown };
  *   hotels.update(payload).eq('id', ...)                  → hotelUpdate
  *   candidate_businesses.select(...).eq('id',...).maybeSingle() → candidateLookup
  *   candidate_businesses.insert(payload).select('id').single() → candidateInsert
+ *   await candidate_businesses.insert(payloads)            → candidateBatchInsert
  *   candidate_businesses.update(payload).eq('id', ...)    → candidateUpdate
  */
 function makeServiceClient(
@@ -60,6 +69,7 @@ function makeServiceClient(
     hotelUpdate?: ChainResponse;
     candidateLookup?: ChainResponse;
     candidateInsert?: ChainResponse;
+    candidateBatchInsert?: ChainResponse;
     candidateUpdate?: ChainResponse;
   } = {},
 ) {
@@ -108,7 +118,10 @@ function makeServiceClient(
           })),
           insert: vi.fn((payload: unknown) => {
             captured.candidateInsert.push(payload);
+            const batchResult = opts.candidateBatchInsert ?? { data: null, error: null };
             return {
+              // Single-row path: .insert(payload).select('id').single()
+              // — addCandidateManualStaff / addCandidateFromGooglePlaces.
               select: vi.fn(() => ({
                 single: vi.fn(() =>
                   Promise.resolve(
@@ -116,6 +129,12 @@ function makeServiceClient(
                   ),
                 ),
               })),
+              // Batch path: `await service.from(...).insert(payloads)` —
+              // uploadCandidateCsv awaits the builder directly, so make
+              // it thenable. The single-row path never awaits this
+              // object (it chains .select().single()), so `then` is
+              // dormant there.
+              then: (resolve: (value: ChainResponse) => unknown) => resolve(batchResult),
             };
           }),
           update: vi.fn((payload: unknown) => {
@@ -211,6 +230,25 @@ function makePlaceResult(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * FormData for uploadCandidateCsv. `file` defaults to a real File (so
+ * the action's `await file.text()` resolves — the parse result itself
+ * is controlled by parseCandidatesCsvMock). Pass `file: null` to omit
+ * it, or `file: 'a string'` to submit a non-File entry.
+ */
+function makeCsvFormData(opts: { hotelId?: string; file?: File | string | null } = {}): FormData {
+  const fd = new FormData();
+  fd.set('hotelId', opts.hotelId ?? HOTEL_ID);
+  if (opts.file === null) {
+    // omit the file entry entirely
+  } else if (typeof opts.file === 'string') {
+    fd.set('file', opts.file);
+  } else {
+    fd.set('file', opts.file ?? new File(['name\nCafe\n'], 'candidates.csv', { type: 'text/csv' }));
+  }
+  return fd;
+}
+
 beforeEach(() => {
   vi.resetModules();
   createServiceRoleClientMock.mockReset();
@@ -219,6 +257,7 @@ beforeEach(() => {
   revalidatePathMock.mockReset();
   requireStaffMock.mockReset();
   getPlaceDetailsMock.mockReset();
+  parseCandidatesCsvMock.mockReset();
   requireStaffMock.mockResolvedValue({
     kind: 'ok',
     userId: STAFF_USER_ID,
@@ -1021,6 +1060,235 @@ describe('addCandidateFromGooglePlaces', () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
     expect(auditEntry('candidate_add_failed')).toMatchObject({
       after: { reason: 'insert_failed', message: 'insert boom' },
+    });
+  });
+});
+
+// ===========================================================================
+// uploadCandidateCsv
+// ===========================================================================
+
+describe('uploadCandidateCsv', () => {
+  it('happy path — batch-INSERTs the valid rows, audits candidate_csv_imported, revalidates', async () => {
+    const { client, captured } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    parseCandidatesCsvMock.mockReturnValue({
+      ok: true,
+      rows: [
+        { name: 'Cafe One', website: 'https://one.example' },
+        { name: 'Cafe Two', distance_m: 200 },
+        { name: 'Cafe Three' },
+      ],
+      rejected: [],
+    });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({
+      ok: true,
+      message: 'Imported 3 candidates.',
+      importedCount: 3,
+      rejectedCount: 0,
+      rejected: [],
+    });
+
+    // A single batch INSERT of the array of payloads.
+    expect(captured.candidateInsert).toHaveLength(1);
+    const payloads = captured.candidateInsert[0] as Record<string, unknown>[];
+    expect(payloads).toHaveLength(3);
+    for (const payload of payloads) {
+      expect(payload.hotel_id).toBe(HOTEL_ID);
+      expect(payload.source).toBe('csv');
+      expect(payload.proposed_by).toBe(STAFF_USER_ID);
+      expect(payload.status).toBe('proposed');
+    }
+    // undefined optional fields map to null.
+    expect(payloads[2]).toMatchObject({
+      name: 'Cafe Three',
+      address: null,
+      category: null,
+      distance_m: null,
+      phone: null,
+      website: null,
+      contact_email: null,
+    });
+
+    expect(revalidatePathMock).toHaveBeenCalledWith('/hotels/[id]');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/hotels/[id]/candidates');
+
+    expect(auditEntry('candidate_csv_imported')).toMatchObject({
+      actor_role: 'strictons_staff',
+      entity_type: 'candidate_businesses',
+      entity_hotel_id: HOTEL_ID,
+      after: { imported: 3, rejected: 0 },
+    });
+  });
+
+  it('mixed — 2 valid + 1 invalid → success partial with the rejected list', async () => {
+    const { client } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    parseCandidatesCsvMock.mockReturnValue({
+      ok: true,
+      rows: [{ name: 'Cafe One' }, { name: 'Cafe Two' }],
+      rejected: [{ rowNumber: 4, error: 'website: Invalid URL' }],
+    });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({
+      ok: true,
+      message: 'Imported 2 candidates; 1 rows had errors and were skipped.',
+      importedCount: 2,
+      rejectedCount: 1,
+      rejected: [{ rowNumber: 4, error: 'website: Invalid URL' }],
+    });
+    expect(auditEntry('candidate_csv_imported')).toMatchObject({
+      after: { imported: 2, rejected: 1 },
+    });
+  });
+
+  it('all-rejection — 0 valid rows is success with N=0, and the batch INSERT is skipped', async () => {
+    const { client, captured } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    parseCandidatesCsvMock.mockReturnValue({
+      ok: true,
+      rows: [],
+      rejected: [
+        { rowNumber: 2, error: 'name: Too small' },
+        { rowNumber: 3, error: 'name: Too small' },
+        { rowNumber: 4, error: 'website: Invalid URL' },
+      ],
+    });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({
+      ok: true,
+      message: 'Imported 0 candidates; 3 rows had errors and were skipped.',
+      importedCount: 0,
+      rejectedCount: 3,
+      rejected: [
+        { rowNumber: 2, error: 'name: Too small' },
+        { rowNumber: 3, error: 'name: Too small' },
+        { rowNumber: 4, error: 'website: Invalid URL' },
+      ],
+    });
+    // Nothing to insert — the batch INSERT is skipped entirely.
+    expect(captured.candidateInsert).toHaveLength(0);
+    expect(auditEntry('candidate_csv_imported')).toMatchObject({
+      after: { imported: 0, rejected: 3 },
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/hotels/[id]/candidates');
+  });
+
+  it('rejects when caller is not staff (no service client, no parse, no audit)', async () => {
+    requireStaffMock.mockResolvedValue({ kind: 'error', error: 'Not signed in.' });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({ error: 'Not signed in.' });
+    expect(createServiceRoleClientMock).not.toHaveBeenCalled();
+    expect(parseCandidatesCsvMock).not.toHaveBeenCalled();
+    expect(writeAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it('audits validation_failed for a malformed hotelId, before any parse', async () => {
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData({ hotelId: 'not-a-uuid' }));
+
+    expect(state).toEqual({ error: 'Invalid request.', rejected: [] });
+    expect(createServiceRoleClientMock).not.toHaveBeenCalled();
+    expect(parseCandidatesCsvMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_csv_import_failed')).toMatchObject({
+      after: { reason: 'validation_failed' },
+    });
+  });
+
+  it('audits validation_failed when no file is provided', async () => {
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData({ file: null }));
+
+    expect(state).toEqual({ error: 'Please choose a CSV file to upload.', rejected: [] });
+    expect(parseCandidatesCsvMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_csv_import_failed')).toMatchObject({
+      after: { reason: 'validation_failed' },
+    });
+  });
+
+  it('audits validation_failed when the file entry is not a File', async () => {
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData({ file: 'just-a-string' }));
+
+    expect(state).toEqual({ error: 'Please choose a CSV file to upload.', rejected: [] });
+    expect(parseCandidatesCsvMock).not.toHaveBeenCalled();
+  });
+
+  it('audits hotel_not_found and does NOT parse when the hotel SELECT returns no row', async () => {
+    const { client } = makeServiceClient({ hotelLookup: { data: null, error: null } });
+    createServiceRoleClientMock.mockReturnValue(client);
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({ error: 'Hotel not found.', rejected: [] });
+    expect(parseCandidatesCsvMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_csv_import_failed')).toMatchObject({
+      after: { reason: 'hotel_not_found' },
+    });
+  });
+
+  it.each([
+    ['oversized', 'oversized', 'The CSV file is too large. The maximum size is 1 MB.'],
+    ['too_many_rows', 'too_many_rows', 'The CSV has 501 data rows. The maximum is 500.'],
+    [
+      'missing_name_column',
+      'missing_name_column',
+      "The CSV is missing the required 'name' column.",
+    ],
+    ['empty', 'parse_failed', 'The CSV file is empty.'],
+    ['no_data_rows', 'parse_failed', 'The CSV has no data rows.'],
+    ['parse_failed', 'parse_failed', 'The CSV could not be parsed.'],
+  ])('maps parser fatal reason %s to audit reason %s', async (parserReason, auditReason, error) => {
+    const { client } = makeServiceClient();
+    createServiceRoleClientMock.mockReturnValue(client);
+    parseCandidatesCsvMock.mockReturnValue({ ok: false, error, reason: parserReason });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({ error, rejected: [] });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_csv_import_failed')).toMatchObject({
+      entity_hotel_id: HOTEL_ID,
+      after: { reason: auditReason, message: error },
+    });
+  });
+
+  it('audits insert_failed when the batch INSERT errors — the parser rejections still surface', async () => {
+    const { client } = makeServiceClient({
+      candidateBatchInsert: { data: null, error: { message: 'batch insert boom' } },
+    });
+    createServiceRoleClientMock.mockReturnValue(client);
+    parseCandidatesCsvMock.mockReturnValue({
+      ok: true,
+      rows: [{ name: 'Cafe One' }, { name: 'Cafe Two' }],
+      rejected: [{ rowNumber: 5, error: 'contact_email: Invalid email' }],
+    });
+
+    const { uploadCandidateCsv } = await import('./actions');
+    const state = await uploadCandidateCsv({}, makeCsvFormData());
+
+    expect(state).toEqual({
+      error: 'Import failed; no rows inserted.',
+      rejected: [{ rowNumber: 5, error: 'contact_email: Invalid email' }],
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(auditEntry('candidate_csv_import_failed')).toMatchObject({
+      after: { reason: 'insert_failed', message: 'batch insert boom' },
     });
   });
 });

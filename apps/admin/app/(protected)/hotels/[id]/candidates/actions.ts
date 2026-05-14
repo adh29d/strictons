@@ -6,6 +6,7 @@ import { createServiceRoleClient } from '@strictons/db/client';
 import { writeAuditLog } from '@strictons/db/audit';
 import {
   AddFromGooglePlacesInputSchema,
+  CsvUploadInputSchema,
   ManualCandidateInputSchema,
   MarkListReadyForReviewInputSchema,
   RemoveCandidateInputSchema,
@@ -13,19 +14,25 @@ import {
 } from '@strictons/types/candidates';
 import { requireStaff } from '@/lib/require-staff';
 import { getPlaceDetails, PlacesConfigError, PlacesUpstreamError } from '@/lib/google-places';
-import type { AddCandidateState, MarkReadyState, RemoveCandidateState, ReopenState } from './types';
+import { parseCandidatesCsv, type CsvParseFailReason } from '@/lib/parse-candidates-csv';
+import type {
+  AddCandidateState,
+  MarkReadyState,
+  RemoveCandidateState,
+  ReopenState,
+  UploadCsvState,
+} from './types';
 
 /**
  * Phase 6 admin-side candidate-list Server Actions (PHASE_6_PLAN.md
- * §3.1). Five of the six admin actions now land here:
+ * §3.1). All six admin actions:
  *
- *   - addCandidateManualStaff       (commit 5)
- *   - removeCandidateAsStaff        (commit 5)
+ *   - addCandidateManualStaff        (commit 5)
+ *   - removeCandidateAsStaff         (commit 5)
  *   - markCandidateListReadyForReview (commit 5)
- *   - reopenCandidateList           (commit 5)
- *   - addCandidateFromGooglePlaces  (commit 6)
- *
- * uploadCandidateCsv (commit 7) follows.
+ *   - reopenCandidateList            (commit 5)
+ *   - addCandidateFromGooglePlaces   (commit 6)
+ *   - uploadCandidateCsv             (commit 7)
  *
  * Conventions (Phase 4/5 locked):
  *
@@ -850,6 +857,212 @@ export async function addCandidateFromGooglePlaces(
 
       revalidateCandidateRoutes();
       return { ok: true, message: 'Candidate added.', candidateId: inserted.id };
+    },
+  );
+}
+
+// ----------------------------------------------------------------------------
+// uploadCandidateCsv
+// ----------------------------------------------------------------------------
+
+/**
+ * Maps the commit-4 parser's fatal `reason` discriminant to a frozen
+ * §8 candidate_csv_import_failed audit reason. Exhaustive over
+ * CsvParseFailReason so a future parser reason is a compile error here
+ * rather than a silent miss. `empty` and `no_data_rows` both collapse
+ * to `parse_failed` — they're "the file had nothing importable", which
+ * §8's `parse_failed` covers.
+ */
+const PARSER_REASON_TO_AUDIT_REASON: Record<CsvParseFailReason, string> = {
+  oversized: 'oversized',
+  too_many_rows: 'too_many_rows',
+  missing_name_column: 'missing_name_column',
+  empty: 'parse_failed',
+  no_data_rows: 'parse_failed',
+  parse_failed: 'parse_failed',
+};
+
+export async function uploadCandidateCsv(
+  _prev: UploadCsvState,
+  formData: FormData,
+): Promise<UploadCsvState> {
+  return withServerActionInstrumentation(
+    'admin:uploadCandidateCsv',
+    async (): Promise<UploadCsvState> => {
+      const auth = await requireStaff();
+      if (auth.kind === 'error') {
+        return { error: auth.error };
+      }
+      const { userId: staffUserId } = auth;
+
+      // ---- Validate the FormData shape ----
+      // The hotelId is zod-validated; the file is validated as a File
+      // instance (a File/Blob can't go through zod). Either failure is
+      // validation_failed — a malformed FormData, distinct from the
+      // per-row rejections the parser produces.
+      const parsedInput = CsvUploadInputSchema.safeParse({
+        hotelId: (formData.get('hotelId') ?? '').toString(),
+      });
+      const file = formData.get('file');
+      if (!parsedInput.success || !(file instanceof File)) {
+        const message = !parsedInput.success
+          ? zodErrorSummary(parsedInput.error.issues).message
+          : 'No CSV file was provided.';
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_csv_import_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: null,
+          after: { reason: 'validation_failed', message },
+        });
+        return {
+          error: !parsedInput.success ? 'Invalid request.' : 'Please choose a CSV file to upload.',
+          rejected: [],
+        };
+      }
+      const { hotelId } = parsedInput.data;
+
+      const service = createServiceRoleClient();
+
+      // ---- SELECT the hotel to confirm it exists ----
+      // Before reading + parsing the file, so a bad hotelId doesn't
+      // waste the parse. entity_hotel_id stays null here because the
+      // hotel doesn't exist — a non-existent id would FK-violate the
+      // audit_log.entity_hotel_id reference.
+      const { data: hotelRow, error: hotelLookupError } = await service
+        .from('hotels')
+        .select('id')
+        .eq('id', hotelId)
+        .maybeSingle();
+      if (hotelLookupError || !hotelRow) {
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_csv_import_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: null,
+          after: {
+            reason: 'hotel_not_found',
+            message: hotelLookupError?.message ?? null,
+          },
+        });
+        return { error: 'Hotel not found.', rejected: [] };
+      }
+
+      // ---- Read + parse the file ----
+      // The commit-4 parser owns the size cap (pre-parse, on the decoded
+      // string's byte length), the row cap, the header check, and the
+      // per-row validation. The action does not duplicate any of that —
+      // it maps the parser's fatal `reason` to a frozen §8 audit reason.
+      const content = await file.text();
+      const parseResult = parseCandidatesCsv(content);
+
+      if (!parseResult.ok) {
+        const reason = PARSER_REASON_TO_AUDIT_REASON[parseResult.reason];
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_csv_import_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: hotelId,
+          after: { reason, message: parseResult.error },
+        });
+        return { error: parseResult.error, rejected: [] };
+      }
+
+      const { rows, rejected } = parseResult;
+      const rejectedCount = rejected.length;
+
+      // ---- All rows failed per-row validation ----
+      // The file parsed cleanly but every data row failed CsvRowSchema.
+      // Per the plan-review round this is success-with-N=0, not failure:
+      // §3.1's failure cases enumerate structural problems, and the
+      // partial-success message template is grammatical at N=0. Skip the
+      // batch INSERT entirely — there is nothing to insert.
+      if (rows.length === 0) {
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_csv_imported',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: hotelId,
+          after: { imported: 0, rejected: rejectedCount },
+        });
+        revalidateCandidateRoutes();
+        return {
+          ok: true,
+          message: `Imported 0 candidates; ${rejectedCount} rows had errors and were skipped.`,
+          importedCount: 0,
+          rejectedCount,
+          rejected,
+        };
+      }
+
+      // ---- Single batch INSERT of the valid rows ----
+      // No per-row best-effort: if the batch fails, no rows land; if it
+      // succeeds, all valid rows land (§7.4). source / proposed_by /
+      // status are uniform across every row.
+      const insertPayloads = rows.map((row) => ({
+        hotel_id: hotelId,
+        source: 'csv' as const,
+        name: row.name,
+        address: row.address ?? null,
+        category: row.category ?? null,
+        distance_m: row.distance_m ?? null,
+        phone: row.phone ?? null,
+        website: row.website ?? null,
+        contact_email: row.contact_email ?? null,
+        proposed_by: staffUserId,
+        status: 'proposed' as const,
+      }));
+
+      const { error: insertError } = await service
+        .from('candidate_businesses')
+        .insert(insertPayloads);
+
+      if (insertError) {
+        await writeAuditLog({
+          actor_user_id: staffUserId,
+          actor_role: 'strictons_staff',
+          action: 'candidate_csv_import_failed',
+          entity_type: 'candidate_businesses',
+          entity_id: crypto.randomUUID(),
+          entity_hotel_id: hotelId,
+          after: { reason: 'insert_failed', message: insertError.message },
+        });
+        // The parser's per-row rejections still surface so the user can
+        // fix them before re-running (§7.4).
+        return { error: 'Import failed; no rows inserted.', rejected };
+      }
+
+      // ---- Success ----
+      const importedCount = rows.length;
+      await writeAuditLog({
+        actor_user_id: staffUserId,
+        actor_role: 'strictons_staff',
+        action: 'candidate_csv_imported',
+        entity_type: 'candidate_businesses',
+        entity_id: crypto.randomUUID(),
+        entity_hotel_id: hotelId,
+        after: { imported: importedCount, rejected: rejectedCount },
+      });
+
+      revalidateCandidateRoutes();
+      return {
+        ok: true,
+        message:
+          rejectedCount === 0
+            ? `Imported ${importedCount} candidates.`
+            : `Imported ${importedCount} candidates; ${rejectedCount} rows had errors and were skipped.`,
+        importedCount,
+        rejectedCount,
+        rejected,
+      };
     },
   );
 }

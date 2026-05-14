@@ -99,6 +99,19 @@ export const CsvRowSchema = z.object({
 });
 export type CsvRow = z.infer<typeof CsvRowSchema>;
 
+/**
+ * FormData input for the uploadCandidateCsv Server Action. The CSV file
+ * itself is a File/Blob and cannot be zod-validated — it goes through
+ * parseCandidatesCsv (apps/admin/lib/parse-candidates-csv). This schema
+ * covers the only zod-validatable part of the FormData: the hotel id.
+ * Completes the one-schema-per-action pattern the other admin actions
+ * follow.
+ */
+export const CsvUploadInputSchema = z.object({
+  hotelId: z.uuid(),
+});
+export type CsvUploadInput = z.infer<typeof CsvUploadInputSchema>;
+
 // ----------------------------------------------------------------------------
 // Remove (soft-delete)
 // ----------------------------------------------------------------------------

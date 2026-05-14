@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import Papa from 'papaparse';
 import { parseCandidatesCsv } from './parse-candidates-csv';
 
 describe('parseCandidatesCsv — well-formed input', () => {
@@ -179,22 +180,30 @@ describe('parseCandidatesCsv — per-row validation (partial success)', () => {
 describe('parseCandidatesCsv — fatal cases', () => {
   it('is fatal when the file is empty (zero bytes)', () => {
     const result = parseCandidatesCsv('');
-    expect(result).toEqual({ ok: false, error: 'The CSV file is empty.' });
+    expect(result).toEqual({ ok: false, error: 'The CSV file is empty.', reason: 'empty' });
   });
 
   it('is fatal when the file is whitespace only', () => {
     const result = parseCandidatesCsv('   \n  \n');
-    expect(result).toEqual({ ok: false, error: 'The CSV file is empty.' });
+    expect(result).toEqual({ ok: false, error: 'The CSV file is empty.', reason: 'empty' });
   });
 
   it('is fatal when the file is header-only (no data rows) — distinct from empty', () => {
     const result = parseCandidatesCsv('name,phone\n');
-    expect(result).toEqual({ ok: false, error: 'The CSV has no data rows.' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'The CSV has no data rows.',
+      reason: 'no_data_rows',
+    });
   });
 
   it('is fatal when the file is header-only without a trailing newline', () => {
     const result = parseCandidatesCsv('name,phone');
-    expect(result).toEqual({ ok: false, error: 'The CSV has no data rows.' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'The CSV has no data rows.',
+      reason: 'no_data_rows',
+    });
   });
 
   it('is fatal when the required name column is missing', () => {
@@ -203,6 +212,7 @@ describe('parseCandidatesCsv — fatal cases', () => {
     expect(result).toEqual({
       ok: false,
       error: "The CSV is missing the required 'name' column.",
+      reason: 'missing_name_column',
     });
   });
 
@@ -215,6 +225,7 @@ describe('parseCandidatesCsv — fatal cases', () => {
     expect(result).toEqual({
       ok: false,
       error: 'The CSV file is too large. The maximum size is 1 MB.',
+      reason: 'oversized',
     });
   });
 
@@ -238,7 +249,28 @@ describe('parseCandidatesCsv — fatal cases', () => {
     expect(result).toEqual({
       ok: false,
       error: 'The CSV has 501 data rows. The maximum is 500.',
+      reason: 'too_many_rows',
     });
+  });
+
+  it('is fatal with reason parse_failed when papaparse itself throws', () => {
+    // Papa.parse on a string does not throw for malformed CSV, so the
+    // 'parse_failed' branch is exercised by forcing a throw — this proves
+    // the third-party-library boundary degrades to a typed fatal rather
+    // than letting an unhandled throw escape the parser.
+    const spy = vi.spyOn(Papa, 'parse').mockImplementation(() => {
+      throw new Error('simulated papaparse internal failure');
+    });
+
+    const result = parseCandidatesCsv('name\nBeachside Cafe\n');
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'The CSV could not be parsed.',
+      reason: 'parse_failed',
+    });
+
+    spy.mockRestore();
   });
 
   it('does not count a trailing blank line toward the 500-row cap', () => {
