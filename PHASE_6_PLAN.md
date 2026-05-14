@@ -539,10 +539,18 @@ A persistent table is justified only if (a) we hit the free-credit cap repeatedl
 
 ### 6.5 Error handling
 
+Two typed error classes, distinguished so the caller can map them to the two audit reasons §6.6 names:
+
+- **`PlacesConfigError`** — thrown when `GOOGLE_PLACES_API_KEY` is missing/empty. The adapter throws this _before_ any network call. Commit 6's Server Action does `instanceof PlacesConfigError` → audit `reason='missing_api_key'`.
+- **`PlacesUpstreamError`** — thrown for any failure talking to Google: timeout, network error, or HTTP non-2xx. Carries an optional `status` (set for HTTP non-2xx, undefined for timeout/network). Commit 6's Server Action maps this → audit `reason='places_api_failed'`.
+
+Behaviour:
+
 - Validation: input through zod before any network call.
-- Timeout: `AbortController` at 8 s per request; on timeout → typed `PlacesUpstreamError`.
-- HTTP non-2xx: parse Google's error body for the message; raise `PlacesUpstreamError` with the status + message. The Server Action / Route Handler converts to a user-facing message.
-- Empty results: not an error; the Server Action returns `{ ok: true, results: [] }`. UI says "no matches."
+- Missing API key: `requireApiKey()` throws `PlacesConfigError` at the top of each request function, before `fetch` is reached.
+- Timeout: `AbortController` at 8 s per request; an `AbortError` from the aborted fetch → `PlacesUpstreamError` with a "timed out" message (no `status`).
+- HTTP non-2xx: parse Google's error body for the message; raise `PlacesUpstreamError` with the status + message. Non-JSON error bodies fall back to the HTTP status line. The Server Action / Route Handler converts to a user-facing message.
+- Empty results: not an error; the Server Action returns `{ ok: true, results: [] }`. UI says "no matches." The adapter caches the empty array for the search TTL.
 
 ### 6.6 Secret name + provisioning
 
@@ -667,7 +675,7 @@ Plus the existing test 21 in `01_unauth.spec.sql` (structural audit for orphan G
 ### 9.2 Unit tests
 
 - `packages/types/src/candidates.test.ts` — schema positive/negative cases.
-- `apps/admin/lib/google-places.test.ts` — `fetch` mocked; happy path, 4xx error, 5xx error, timeout, field-mask presence, cache hit, cache miss, TTL expiry, LRU eviction at 500 entries, rate-limit-bucket-overflow behaviour.
+- `apps/admin/lib/google-places.test.ts` — `fetch` mocked; happy path (search + details mapping), 4xx error, 5xx error, non-JSON error body, timeout, `PlacesConfigError` on a missing `GOOGLE_PLACES_API_KEY` (asserts it's `PlacesConfigError`, not `PlacesUpstreamError`, and that no `fetch` is made), field-mask presence (both endpoints), cache hit, case/whitespace-insensitive cache key, cache miss, search-vs-details independent TTLs, TTL expiry, LRU eviction at the 500-entry cap, LRU read-promotes, per-user rate-limit buckets, rate-limit-bucket-overflow + window reset.
 - `apps/admin/lib/parse-candidates-csv.test.ts` — well-formed CSV; missing optional columns; missing required `name` column (fatal); quoted-comma fields; BOM-prefixed file; per-row validation failure mix; >500 rows (fatal); >1 MB (fatal); empty file.
 - `apps/admin/app/(protected)/hotels/[id]/candidates/actions.test.ts` — every action, every branch (per Phase 5 pattern). `revalidatePath` mocked. `createServiceRoleClient` mocked. **Explicitly covers the `addCandidateFromGooglePlaces` Postgres 23505 → `duplicate_place` error-mapping branch** — i.e. when the partial unique index rejects the INSERT, the action returns `{ ok: false, fieldErrors: { placeId: '<message pointing at existing row>' } }` and audits `candidate_add_failed` with `reason: 'duplicate_place'`. (The constraint itself is tested at pgTAP level; the action's error-mapping is tested here.) Also covers the staff-removal status=`removed_by_strictons` write (Q3) and the reopen `reason` payload presence/absence (Q4).
 - `apps/admin/app/api/places/search/route.test.ts` — auth gate, rate limit, success, validation failure, upstream error.
