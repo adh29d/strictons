@@ -22,7 +22,7 @@
 
 begin;
 
-select plan(22);
+select plan(25);
 
 select _test_reset_role();
 
@@ -67,8 +67,10 @@ insert into public.candidate_businesses (id, hotel_id, source, name)
   );
 
 -- Move hotel_a into candidate_list_with_hotel so admin can perform the
--- approve transition in T11. Hotel_b stays in pending_design_meeting so
--- T12/T13 can exercise the "from wrong state" rejections.
+-- approve transition in T11. Hotel_b's approval_state is reset to
+-- candidate_list_with_hotel just-in-time before T13 (the trigger needs
+-- hotel_b in a state where the FROM side passes so the test exercises
+-- the rejected target-value branch).
 update public.hotels
   set approval_state = 'candidate_list_with_hotel',
       candidate_list_approval_due_at = now() + interval '14 days'
@@ -266,12 +268,14 @@ select is(
 );
 
 -- ============================================================================
--- T11-T13. Hotel-admin UPDATE on hotels.approval_state (approve transition).
+-- T11-T16. Hotel-admin UPDATE on hotels.approval_state and the
+-- approval-state transition trigger (defense-in-depth backstop).
 -- ============================================================================
 
 -- T11. Hotel admin can transition hotels.approval_state from
 -- candidate_list_with_hotel to candidate_list_approved (the one allowed
--- one-way transition per Phase 6).
+-- one-way transition per Phase 6). Exercises both the new permissive
+-- RLS policy AND the new transition trigger's allow-branch.
 select lives_ok(
   format(
     $$update public.hotels
@@ -283,66 +287,105 @@ select lives_ok(
   'hotel_admin UPDATE hotels.approval_state with_hotel -> approved succeeds'
 );
 
--- T12. Hotel admin cannot transition hotels.approval_state FROM
--- candidate_list_approved (USING rejects — not in the with_hotel state).
-do $$
-declare
-  rc int;
-begin
-  update public.hotels
-    set approval_state = 'candidate_list_drafted',
-        candidate_list_approved_at = null
-    where id = (select v from _t where k='hotel_a');
-  get diagnostics rc = row_count;
-  perform set_config('test.t12_from_count', rc::text, true);
-end;
-$$;
-
-select is(
-  current_setting('test.t12_from_count')::int,
-  0,
-  'hotel_admin UPDATE hotels.approval_state from non-with_hotel state matches zero rows'
+-- T12. Hotel admin trying to reverse the approval (approved -> drafted)
+-- is rejected by the transition trigger. hotel_a is now in 'approved'
+-- after T11; the trigger fires (approval_state distinct from old) and
+-- raises because the transition is not the allowed one.
+select throws_ok(
+  format(
+    $$update public.hotels
+        set approval_state = 'candidate_list_drafted',
+            candidate_list_approved_at = null
+        where id = %L$$,
+    (select v from _t where k='hotel_a')
+  ),
+  '42501',
+  null,
+  'transition trigger: hotel_admin cannot reverse approve (approved -> drafted) — raises 42501'
 );
 
--- T13. Hotel admin cannot transition hotels.approval_state TO a value
--- other than candidate_list_approved (WITH CHECK rejects).
--- Reset hotel_b to with_hotel so the USING side passes, then attempt
--- a target other than approved.
+-- T13. Hotel admin transitioning from with_hotel to a non-approved target
+-- value (e.g. drafted) is rejected by the trigger.
+-- Setup: reset hotel_b to with_hotel via postgres.
 select _test_reset_role();
 update public.hotels
   set approval_state = 'candidate_list_with_hotel',
-      candidate_list_approval_due_at = now() + interval '14 days'
+      candidate_list_approval_due_at = now() + interval '14 days',
+      candidate_list_approved_at = null
   where id = (select v from _t where k='hotel_b');
 
 select _test_as_user((select v from _t where k='admin_b'));
 
-do $$
-begin
-  begin
-    update public.hotels
-      set approval_state = 'candidate_list_drafted'
-      where id = (select v from _t where k='hotel_b');
-  exception when others then
-    null;
-  end;
-end;
-$$;
+select throws_ok(
+  format(
+    $$update public.hotels
+        set approval_state = 'candidate_list_drafted'
+        where id = %L$$,
+    (select v from _t where k='hotel_b')
+  ),
+  '42501',
+  null,
+  'transition trigger: hotel_admin cannot transition to a non-approved target — raises 42501'
+);
 
-select is(
-  (select approval_state::text from public.hotels
-     where id = (select v from _t where k='hotel_b')),
-  'candidate_list_with_hotel',
-  'hotel_admin UPDATE hotels.approval_state to non-approved value is blocked'
+-- T14. Regression guard: hotel admin updating ONLY contact_email (no
+-- approval_state change) still succeeds via the existing Phase 4
+-- contact_email policy. The trigger's WHEN clause (new.approval_state is
+-- distinct from old.approval_state) means the trigger does not fire for
+-- contact_email-only updates.
+select lives_ok(
+  format(
+    $$update public.hotels
+        set contact_email = 'updated-by-admin-b@example.test'
+        where id = %L$$,
+    (select v from _t where k='hotel_b')
+  ),
+  'contact_email-only UPDATE by hotel_admin succeeds (trigger does not fire)'
+);
+
+-- T15. Hotel admin attempting to change contact_email AND approval_state
+-- in the same UPDATE is rejected by the trigger. The contact_email
+-- policy's loose WITH CHECK would have permitted this without the trigger.
+-- This is the exact composite-update failure case the trigger guards.
+select throws_ok(
+  format(
+    $$update public.hotels
+        set contact_email = 'sneaky-state-change@example.test',
+            approval_state = 'candidate_list_drafted'
+        where id = %L$$,
+    (select v from _t where k='hotel_b')
+  ),
+  '42501',
+  null,
+  'transition trigger: composite UPDATE that touches approval_state is rejected even via the contact_email policy'
+);
+
+-- T16. Service-role bypass: postgres / service_role can transition the
+-- approval_state through any sequence the application code chooses.
+-- Strictons-side transitions (drafted -> with_hotel, businesses_pitching,
+-- paused, etc.) are owned by service-role code paths.
+select _test_reset_role();
+select _test_as_service();
+
+select lives_ok(
+  format(
+    $$update public.hotels
+        set approval_state = 'candidate_list_drafted',
+            candidate_list_approved_at = null
+        where id = %L$$,
+    (select v from _t where k='hotel_a')
+  ),
+  'service_role bypasses the transition trigger and can move approval_state freely'
 );
 
 -- ============================================================================
--- T14-T15. Service-role staff-side soft-delete + enum-presence check.
+-- T17-T18. Service-role staff-side soft-delete + enum-presence check.
 -- ============================================================================
 
 select _test_reset_role();
 select _test_as_service();
 
--- T14. Service-role can write status='removed_by_strictons' (the staff-side
+-- T17. Service-role can write status='removed_by_strictons' (the staff-side
 -- soft-delete value introduced by Q3). Bypasses RLS and column GRANTs.
 select lives_ok(
   format(
@@ -357,7 +400,7 @@ select lives_ok(
   'service_role UPDATE status=removed_by_strictons succeeds (Q3 staff-side path)'
 );
 
--- T15. The new enum value is registered on the candidate_status type.
+-- T18. The new enum value is registered on the candidate_status type.
 select is(
   (select count(*)::int from pg_type t
      join pg_enum e on e.enumtypid = t.oid
@@ -367,7 +410,7 @@ select is(
 );
 
 -- ============================================================================
--- T16-T17. Partial unique index on (hotel_id, google_place_id) — alive only.
+-- T19-T20. Partial unique index on (hotel_id, google_place_id) — alive only.
 -- ============================================================================
 
 select _test_reset_role();
@@ -386,7 +429,7 @@ insert into public.candidate_businesses
     'Place A'
   );
 
--- T16. Adding the same (hotel_id, google_place_id) while the original is
+-- T19. Adding the same (hotel_id, google_place_id) while the original is
 -- alive (removed_at is null AND status <> 'signed_to_placement') raises a
 -- unique-violation from the partial index.
 select throws_ok(
@@ -408,7 +451,7 @@ update public.candidate_businesses
       removed_by = null
   where id = (select v from _t where k='cand_gp_a');
 
--- T17. After soft-delete, the partial index excludes the original row, so
+-- T20. After soft-delete, the partial index excludes the original row, so
 -- re-adding the same (hotel_id, google_place_id) succeeds.
 select lives_ok(
   format(
@@ -421,10 +464,10 @@ select lives_ok(
 );
 
 -- ============================================================================
--- T18-T19. candidate_businesses_removed_pair_check.
+-- T21-T22. candidate_businesses_removed_pair_check.
 -- ============================================================================
 
--- T18. Setting removed_at without removed_by raises (CHECK violation).
+-- T21. Setting removed_at without removed_by raises (CHECK violation).
 select throws_ok(
   format(
     $$update public.candidate_businesses
@@ -437,7 +480,7 @@ select throws_ok(
   'removed_pair_check: removed_at NOT NULL with removed_by NULL is rejected'
 );
 
--- T19. Setting removed_by without removed_at raises (CHECK violation).
+-- T22. Setting removed_by without removed_at raises (CHECK violation).
 -- First reset cand_a1 to a clean state.
 update public.candidate_businesses
   set status = 'proposed',
@@ -460,13 +503,13 @@ select throws_ok(
 );
 
 -- ============================================================================
--- T20-T22. Unauth (anon) coverage.
+-- T23-T25. Unauth (anon) coverage.
 -- ============================================================================
 
 select _test_reset_role();
 select _test_as_anon();
 
--- T20. Anon SELECT returns zero rows (RLS denies; no anon policy on
+-- T23. Anon SELECT returns zero rows (RLS denies; no anon policy on
 -- candidate_businesses).
 select is(
   (select count(*)::int from public.candidate_businesses),
@@ -474,7 +517,7 @@ select is(
   'anon SELECT candidate_businesses returns zero rows'
 );
 
--- T21. Anon INSERT is denied. The blanket revoke from anon (migration 11)
+-- T24. Anon INSERT is denied. The blanket revoke from anon (migration 11)
 -- means the statement raises permission-denied before RLS evaluates.
 select throws_ok(
   format(
@@ -487,7 +530,7 @@ select throws_ok(
   'anon INSERT candidate_businesses denied'
 );
 
--- T22. Anon UPDATE is denied (same blanket revoke).
+-- T25. Anon UPDATE is denied (same blanket revoke).
 select throws_ok(
   format(
     $$update public.candidate_businesses

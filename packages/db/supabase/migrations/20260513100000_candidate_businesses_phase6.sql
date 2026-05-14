@@ -202,6 +202,70 @@ create policy "hotels_update_admin_approve_candidate_list"
 -- The existing hotels_update_admin_contact_email policy (Phase 4) remains
 -- in place and continues to cover the contact_email path; both policies
 -- coexist as OR.
+--
+-- ----------------------------------------------------------------------------
+-- BEFORE UPDATE trigger gating approval_state transitions
+-- ----------------------------------------------------------------------------
+-- The two permissive UPDATE policies on hotels (contact_email + new
+-- approve-candidate-list) are OR'd by Postgres, which means the loose
+-- contact_email policy's WITH CHECK (just is_hotel_admin(id)) would let a
+-- hotel admin bypass the strict approve policy's value constraints — column
+-- GRANTs gate WHICH columns may be written but not WHICH VALUES.
+--
+-- The defense-in-depth fix is a BEFORE UPDATE trigger that gates
+-- approval_state transitions at the DB layer regardless of which policy
+-- matched. This matches the existing hotels_slug_immutable trigger pattern
+-- (a trigger gating WHICH VALUES are allowed on a column), extended with a
+-- service-role bypass so Strictons staff writes (per the Phase 2 locked
+-- decision "Strictons writes route through the service-role client") aren't
+-- restricted.
+--
+-- Bypass discriminator: current_user. Supabase's PostgREST sets the role via
+-- SET ROLE (request-scoped) when serving an authenticated request; the
+-- pgTAP test helpers set the same via set_config('role', '...'). The
+-- service-role / postgres / supabase_admin contexts use a different role
+-- name and bypass this trigger.
+
+create or replace function public.enforce_hotel_approval_state_transitions()
+returns trigger
+language plpgsql
+as $$
+begin
+  -- Service-role / postgres / supabase_admin bypass. Strictons-side
+  -- transitions (drafted -> with_hotel, paused, businesses_pitching, etc.)
+  -- come through service-role per the Phase 2 locked decision.
+  if current_user <> 'authenticated' then
+    return new;
+  end if;
+
+  -- The one allowed authenticated-context transition: hotel admin approves
+  -- their candidate list. with_hotel -> approved, with the approved-at
+  -- timestamp set, by a hotel admin of this hotel.
+  if old.approval_state = 'candidate_list_with_hotel'
+     and new.approval_state = 'candidate_list_approved'
+     and new.candidate_list_approved_at is not null
+     and public.is_hotel_admin(new.id) then
+    return new;
+  end if;
+
+  raise exception
+    'illegal hotels.approval_state transition % -> % from authenticated context',
+    old.approval_state, new.approval_state
+    using errcode = '42501';
+end;
+$$;
+comment on function public.enforce_hotel_approval_state_transitions() is
+  'BEFORE UPDATE trigger function: gates hotels.approval_state mutations '
+  'in the authenticated role context. Service-role / postgres / '
+  'supabase_admin bypass. Defense-in-depth backstop for the Phase 6 '
+  'hotel-admin candidate-list-approve transition, since the OR semantics '
+  'of permissive RLS policies do not compose with column-value gating.';
+
+create trigger hotels_enforce_approval_state_transitions
+  before update on public.hotels
+  for each row
+  when (new.approval_state is distinct from old.approval_state)
+  execute function public.enforce_hotel_approval_state_transitions();
 
 -- ---- Comments --------------------------------------------------------------
 

@@ -204,6 +204,20 @@ comment on column public.candidate_businesses.decided_at is
   'Pairs with decided_by_user_id; same Phase 7+ reservation note.';
 ```
 
+### Approval-state transition trigger (defense-in-depth backstop)
+
+The two permissive UPDATE policies on `hotels` for authenticated callers (`hotels_update_admin_contact_email` from Phase 4 and the new `hotels_update_admin_approve_candidate_list` above) are OR'd by Postgres for both USING and WITH CHECK. The Phase 4 contact-email policy's WITH CHECK is loose (`is_hotel_admin(id)` only) because it relied on the column GRANT being `(contact_email)`-only to keep mutations scoped. Once Phase 6 adds `(approval_state, candidate_list_approved_at)` to the authenticated UPDATE GRANT, the loose policy's WITH CHECK lets a hotel admin write any `approval_state` value — column GRANTs gate WHICH columns may be written, not WHICH VALUES.
+
+To preserve the lived "RLS as primary access control" convention from CLAUDE.md while still bounding what hotel admins can do with the now-grantable `approval_state` column, the migration adds a BEFORE UPDATE trigger on `hotels`:
+
+- **Function name:** `public.enforce_hotel_approval_state_transitions()`
+- **Trigger name:** `hotels_enforce_approval_state_transitions`
+- **Fires WHEN:** `new.approval_state is distinct from old.approval_state` (no-op for contact_email-only updates so the existing Phase 4 path stays unaffected)
+- **Bypass mechanism:** `current_user <> 'authenticated'`. Service-role / postgres / supabase_admin contexts skip the trigger body and `return new` immediately. Strictons-side transitions (drafted ↔ with_hotel, businesses_pitching, paused, etc.) all flow through service-role per the Phase 2 locked decision and are therefore unaffected.
+- **Allow-branch (authenticated only):** exactly `old.approval_state = 'candidate_list_with_hotel'` → `new.approval_state = 'candidate_list_approved'` with `candidate_list_approved_at IS NOT NULL` and `is_hotel_admin(new.id) = true`. Any other authenticated-context transition raises with `SQLSTATE 42501`.
+
+This matches the existing `hotels_slug_immutable` trigger pattern in shape (gating WHICH VALUES are allowed on a column), extended with a service-role bypass that the slug-immutable trigger doesn't need. The trigger is documented in spec 12 §9.1 with positive coverage (T11: allowed transition succeeds; T14: contact-email-only update isn't blocked; T16: service-role bypasses freely) and negative coverage (T12: reverse approve raises; T13: target other than `approved` raises; T15: composite contact_email + approval_state UPDATE raises). PROJECT_LOG's Phase 6 entry will record the rationale: defense in depth at the DB layer protects against future permissive-policy interactions that the OR semantics make difficult to gate via RLS alone.
+
 ### pgTAP audit for the Q6 policy narrowing
 
 Audited specs 01, 02, 03, 04, 07, 08 (the candidate_businesses-touching suites) for any test that exercises the hotel-admin `status='approved'` UPDATE path being removed by the policy narrowing. **Audit result: no existing test exercises that path.** The current candidate_businesses tests cover:
@@ -636,9 +650,11 @@ Coverage:
 - Hotel admin can UPDATE a row to set `removed_at=now(), removed_by=auth.uid(), status='removed_by_hotel', removal_reason='...'`. Asserts success.
 - Hotel admin CANNOT UPDATE a row to set status to anything other than `removed_by_hotel` (e.g. `signed_to_placement`, `approved`, or `removed_by_strictons`). Asserts policy violation for each. **The `status='approved'` rejection is the explicit Q6 narrowing assertion.**
 - Hotel admin CANNOT UPDATE another hotel's row.
-- Hotel admin can UPDATE `hotels.approval_state` from `candidate_list_with_hotel` to `candidate_list_approved` only. Asserts success.
-- Hotel admin CANNOT UPDATE `hotels.approval_state` from any other state.
-- Hotel admin CANNOT UPDATE `hotels.approval_state` to anything other than `candidate_list_approved`.
+- Hotel admin can UPDATE `hotels.approval_state` from `candidate_list_with_hotel` to `candidate_list_approved` only (T11). Asserts success.
+- **Approval-state trigger negative coverage** — Hotel admin attempting to reverse an approval (`approved → drafted`, T12) raises with `SQLSTATE 42501`; attempting to transition to a non-`approved` target value (`with_hotel → drafted`, T13) raises the same.
+- **Approval-state trigger no-op coverage** — Contact-email-only UPDATE by hotel admin (no `approval_state` change, T14) still succeeds via the existing Phase 4 policy (regression guard: the trigger's `WHEN` clause must not fire here).
+- **Approval-state trigger composite-UPDATE coverage** — Composite UPDATE that touches both `contact_email` and `approval_state` (T15) raises, demonstrating that the loose contact-email policy's WITH CHECK cannot bypass the trigger.
+- **Approval-state trigger service-role bypass** — Service-role can transition `approval_state` freely (T16); verifies the `current_user <> 'authenticated'` bypass branch.
 - **Service-role UPDATE setting `status='removed_by_strictons'` succeeds (Q3 path).** Bypasses RLS via service-role; verifies the enum append is wired and the column GRANT model lets the staff-side action work.
 - The new `removed_by_strictons` enum value is present in `pg_enum`. (Schema-shape sanity check; cheap. The value is appended without `BEFORE`/`AFTER` so it lands last in `enumsortorder` — captured here as a check that the append ran.)
 - The partial unique index rejects re-adding the same `(hotel_id, google_place_id)` when the previous row is alive.
