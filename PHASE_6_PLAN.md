@@ -239,8 +239,8 @@ export const CANDIDATE_STATUSES = [
   'proposed',
   'approved',
   'removed_by_hotel',
-  'removed_by_strictons',
   'signed_to_placement',
+  'removed_by_strictons',
 ] as const;
 export type CandidateSource = (typeof CANDIDATE_SOURCES)[number];
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
@@ -640,7 +640,7 @@ Coverage:
 - Hotel admin CANNOT UPDATE `hotels.approval_state` from any other state.
 - Hotel admin CANNOT UPDATE `hotels.approval_state` to anything other than `candidate_list_approved`.
 - **Service-role UPDATE setting `status='removed_by_strictons'` succeeds (Q3 path).** Bypasses RLS via service-role; verifies the enum append is wired and the column GRANT model lets the staff-side action work.
-- The new `removed_by_strictons` enum value is present in `pg_enum` and ordered after `removed_by_hotel`. (Schema-shape sanity check; cheap.)
+- The new `removed_by_strictons` enum value is present in `pg_enum`. (Schema-shape sanity check; cheap. The value is appended without `BEFORE`/`AFTER` so it lands last in `enumsortorder` — captured here as a check that the append ran.)
 - The partial unique index rejects re-adding the same `(hotel_id, google_place_id)` when the previous row is alive.
 - The partial unique index ALLOWS re-adding `(hotel_id, google_place_id)` after the previous row is `removed_at IS NOT NULL`.
 - `candidate_businesses_removed_pair_check` rejects `removed_at` set without `removed_by` and vice versa.

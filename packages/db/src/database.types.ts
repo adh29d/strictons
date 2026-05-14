@@ -1381,8 +1381,8 @@ export type Database = {
         | "proposed"
         | "approved"
         | "removed_by_hotel"
-        | "removed_by_strictons"
         | "signed_to_placement"
+        | "removed_by_strictons"
       contract_status:
         | "invited"
         | "signed_pending_deposit"
