@@ -19,6 +19,7 @@
     "@strictons/types": "workspace:*",
     "@strictons/ui": "workspace:*",
     "next": "^15.0.3",
+    "papaparse": "^5.5.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -29,6 +30,7 @@
     "@strictons/config-tsconfig": "workspace:*",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.9.0",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.15.0",

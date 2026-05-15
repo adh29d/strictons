@@ -28,7 +28,13 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  // The html reporter writes an HTML report into apps/partners/playwright-report/
+  // (relative to this config) so e2e.yml's `if: failure()` upload-artifact
+  // step has something to upload. Default outputFolder matches the
+  // workflow's path verbatim.
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]]
+    : 'list',
   use: {
     baseURL: 'http://localhost:3002',
     trace: 'on-first-retry',

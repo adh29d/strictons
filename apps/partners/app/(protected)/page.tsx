@@ -46,8 +46,24 @@ export default async function HomePage(): Promise<React.ReactElement> {
         <h2 className="mb-2 text-base font-semibold">Roles</h2>
         <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
           {memberships.roles.map((role, i) => (
-            <li key={i} className="px-4 py-3 text-sm">
-              {formatRole(role)}
+            <li
+              key={i}
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+            >
+              <span>{formatRole(role)}</span>
+              {role.kind === 'hotel_admin' ? (
+                // Phase 6 commit 10 — per-role candidate-list deeplink for
+                // hotel admins. Always visible regardless of the hotel's
+                // current approval_state; the destination page handles the
+                // empty-state / locked / awaiting-review messaging itself
+                // (PHASE_6_PLAN.md §5).
+                <Link
+                  href={`/hotels/${role.hotelId}/candidates`}
+                  className="rounded border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-100"
+                >
+                  Candidate list
+                </Link>
+              ) : null}
             </li>
           ))}
         </ul>

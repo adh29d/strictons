@@ -444,6 +444,7 @@ export type Database = {
         Row: {
           address: string | null
           category: string | null
+          contact_email: string | null
           created_at: string
           decided_at: string | null
           decided_by_user_id: string | null
@@ -453,14 +454,21 @@ export type Database = {
           id: string
           linked_business_id: string | null
           name: string
+          phone: string | null
           proposed_at: string
+          proposed_by: string | null
+          removal_reason: string | null
+          removed_at: string | null
+          removed_by: string | null
           source: Database["public"]["Enums"]["candidate_source"]
           status: Database["public"]["Enums"]["candidate_status"]
           updated_at: string
+          website: string | null
         }
         Insert: {
           address?: string | null
           category?: string | null
+          contact_email?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by_user_id?: string | null
@@ -470,14 +478,21 @@ export type Database = {
           id?: string
           linked_business_id?: string | null
           name: string
+          phone?: string | null
           proposed_at?: string
+          proposed_by?: string | null
+          removal_reason?: string | null
+          removed_at?: string | null
+          removed_by?: string | null
           source: Database["public"]["Enums"]["candidate_source"]
           status?: Database["public"]["Enums"]["candidate_status"]
           updated_at?: string
+          website?: string | null
         }
         Update: {
           address?: string | null
           category?: string | null
+          contact_email?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by_user_id?: string | null
@@ -487,10 +502,16 @@ export type Database = {
           id?: string
           linked_business_id?: string | null
           name?: string
+          phone?: string | null
           proposed_at?: string
+          proposed_by?: string | null
+          removal_reason?: string | null
+          removed_at?: string | null
+          removed_by?: string | null
           source?: Database["public"]["Enums"]["candidate_source"]
           status?: Database["public"]["Enums"]["candidate_status"]
           updated_at?: string
+          website?: string | null
         }
         Relationships: [
           {
@@ -512,6 +533,20 @@ export type Database = {
             columns: ["linked_business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "candidate_businesses_proposed_by_fkey"
+            columns: ["proposed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "candidate_businesses_removed_by_fkey"
+            columns: ["removed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -1347,6 +1382,7 @@ export type Database = {
         | "approved"
         | "removed_by_hotel"
         | "signed_to_placement"
+        | "removed_by_strictons"
       contract_status:
         | "invited"
         | "signed_pending_deposit"
