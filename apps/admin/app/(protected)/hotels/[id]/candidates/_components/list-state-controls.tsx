@@ -37,6 +37,12 @@ type Props = {
  * inline role="status" still matters for the no-change cases (a
  * rejected transition leaves approval_state untouched, so the form
  * stays mounted and state.error / a no-op message persists).
+ *
+ * If persistent post-success feedback inside ListStateControls is
+ * wanted later, hoist the flash messages into a parent that doesn't
+ * unmount (e.g. own both useActionState hooks at ListStateControls
+ * itself, or surface flash text via page.tsx). Deferred — the header
+ * badge + form swap together communicate the outcome.
  */
 export function ListStateControls({ hotelId, approvalState }: Props): React.ReactElement {
   if (approvalState === 'candidate_list_drafted') {
